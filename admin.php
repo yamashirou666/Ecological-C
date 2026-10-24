@@ -46,7 +46,7 @@ function generateTemporaryAccountPassword(): string
  * ---------------------------------------------------------------------- */
 if (($_GET['export'] ?? '') === 'impact') {
     $rows = $pdo->query(
-        'SELECT u.neighborhood,
+        "SELECT COALESCE(NULLIF(TRIM(u.neighborhood), ''), 'Unassigned') AS neighborhood,
                 COUNT(DISTINCT u.id)             AS members,
                 COUNT(l.id)                      AS logs,
                 COALESCE(SUM(l.weight_kg), 0)    AS kg_diverted,
@@ -54,8 +54,8 @@ if (($_GET['export'] ?? '') === 'impact') {
                 COALESCE(SUM(u.total_points), 0) AS points_issued
            FROM users u
            LEFT JOIN recycling_logs l ON l.user_id = u.id
-          GROUP BY u.neighborhood
-          ORDER BY kg_diverted DESC'
+          GROUP BY COALESCE(NULLIF(TRIM(u.neighborhood), ''), 'Unassigned')
+          ORDER BY kg_diverted DESC"
     )->fetchAll();
 
     header('Content-Type: text/csv; charset=utf-8');
@@ -241,14 +241,14 @@ $byMaterial = $pdo->query(
 
 // Per-neighborhood breakdown (district heatmap data).
 $byHood = $pdo->query(
-    'SELECT u.neighborhood,
+    "SELECT COALESCE(NULLIF(TRIM(u.neighborhood), ''), 'Unassigned') AS neighborhood,
             COUNT(DISTINCT u.id) AS members,
             COALESCE(SUM(l.weight_kg),0) AS kg,
             COALESCE(SUM(l.co2_saved_kg),0) AS co2
        FROM users u
        LEFT JOIN recycling_logs l ON l.user_id = u.id
-      GROUP BY u.neighborhood
-      ORDER BY kg DESC'
+      GROUP BY COALESCE(NULLIF(TRIM(u.neighborhood), ''), 'Unassigned')
+      ORDER BY kg DESC"
 )->fetchAll();
 $maxHoodKg = 0.0;
 foreach ($byHood as $h) {
@@ -266,12 +266,14 @@ $recent = $pdo->query(
 
 // Members table.
 $members = $pdo->query(
-    'SELECT u.id, u.name, u.email, u.neighborhood, u.total_points, u.is_admin,
+    "SELECT u.id, u.name, u.email,
+            COALESCE(NULLIF(TRIM(u.neighborhood), ''), 'Unassigned') AS neighborhood,
+            u.total_points, u.is_admin,
             COALESCE(SUM(l.weight_kg),0) AS kg
        FROM users u
        LEFT JOIN recycling_logs l ON l.user_id = u.id
       GROUP BY u.id
-      ORDER BY u.is_admin DESC, u.total_points DESC'
+      ORDER BY u.is_admin DESC, u.total_points DESC"
 )->fetchAll();
 
 // Chart payload for materials.
@@ -435,7 +437,7 @@ require __DIR__ . '/includes/header.php';
 </section>
 
 <?php if ($byMaterial): ?>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="assets/js/chart.umd.js"></script>
 <script>
     (function () {
         Chart.defaults.font.family = 'Nunito, sans-serif';

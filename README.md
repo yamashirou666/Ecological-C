@@ -29,11 +29,14 @@ neighborhood's collective environmental impact grow on a live dashboard.
 |-----------|-------------------------------------|
 | Backend   | PHP 8.2 (PDO, prepared statements)  |
 | Database  | MariaDB / MySQL (utf8mb4)           |
-| Frontend  | Server-rendered PHP + Tailwind CSS (CDN) |
-| Charts    | Chart.js (CDN)                      |
+| Frontend  | Server-rendered PHP + locally built Tailwind CSS |
+| Charts    | Local Chart.js bundle               |
+| Fonts     | Local Nunito variable font           |
 | Server    | Apache (XAMPP)                      |
 
-No build step or package manager required — it runs directly under XAMPP's `htdocs`.
+The checked-in CSS, chart library, font, and QR library are served locally, so
+normal use requires no internet connection. Node.js is only needed to rebuild
+the checked-in frontend assets.
 
 ---
 
@@ -86,7 +89,14 @@ still be running because PHP and the database continue to run through XAMPP.
 & 'C:\Program Files\nodejs\npm.cmd' install
 ```
 
-4. Launch the desktop app:
+4. (Optional) Rebuild the local CSS, chart library, and font after changing
+frontend dependencies:
+
+```powershell
+& 'C:\Program Files\nodejs\npm.cmd' run build:offline
+```
+
+5. Launch the desktop app:
 
 ```powershell
 & 'C:\Program Files\nodejs\npm.cmd' start

@@ -22,24 +22,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!isset($catalogue[$material])) {
             $errors[] = 'Please choose a valid material type.';
         }
-        if ($weight <= 0 || $weight > 1000) {
-            $errors[] = 'Enter a weight between 0.01 and 1000 kg.';
+        if ($weight <= 0 || $weight > RECYCLING_MAX_KG_PER_ENTRY) {
+            $errors[] = 'Enter a weight between 0.01 and ' . num(RECYCLING_MAX_KG_PER_ENTRY) . ' kg.';
         }
 
         if (!$errors) {
-            $result = recordRecyclingLog((int) $user['id'], $material, $quantity, round($weight, 2), $note);
-
-            $msg = sprintf(
-                'Nice work! You earned %s points and saved %s kg of CO₂.',
-                num($result['points']),
-                num($result['co2'], 2)
-            );
-            setFlash('success', $msg);
-            foreach ($result['new_badges'] as $badge) {
-                setFlash('info', 'Badge unlocked: ' . $badge['icon'] . ' ' . $badge['name'] . '!');
+            try {
+                $result = recordRecyclingLog((int) $user['id'], $material, $quantity, round($weight, 2), $note);
+            } catch (DomainException $ex) {
+                $errors[] = $ex->getMessage();
             }
-            header('Location: log.php');
-            exit;
+
+            if (isset($result)) {
+                $msg = sprintf(
+                    'Nice work! You earned %s points and saved %s kg of CO₂.',
+                    num($result['points']),
+                    num($result['co2'], 2)
+                );
+                setFlash('success', $msg);
+                foreach ($result['new_badges'] as $badge) {
+                    setFlash('info', 'Badge unlocked: ' . $badge['icon'] . ' ' . $badge['name'] . '!');
+                }
+                header('Location: log.php');
+                exit;
+            }
         }
     }
 }

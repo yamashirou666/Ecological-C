@@ -365,7 +365,7 @@ require __DIR__ . '/includes/header.php';
     <?php endif; ?>
 
     <!-- Transaction History Section -->
-    <div class="bg-white rounded-2xl shadow-sm border border-eco-100 p-6">
+    <div id="transaction-history" class="bg-white rounded-2xl shadow-sm border border-eco-100 p-6">
         <div class="flex items-center justify-between mb-6">
             <h2 class="text-2xl font-bold text-slate-900">📊 Transaction History</h2>
             <a href="receipt.php?action=export_csv" class="wallet-secondary-button text-sm font-bold px-4 py-2 rounded-lg transition" aria-label="Export transactions as CSV">
@@ -374,26 +374,22 @@ require __DIR__ . '/includes/header.php';
         </div>
 
         <!-- Filters -->
-        <div class="mb-6 flex flex-col md:flex-row gap-4 items-end">
+        <form id="filterForm" action="wallet.php#transaction-history" method="get" class="mb-6 flex flex-col md:flex-row gap-4 items-end">
             <div class="flex-1">
                 <label for="filterSearch" class="block text-sm font-semibold text-slate-700 mb-2">Search</label>
-                <input type="text" id="filterSearch" placeholder="Search descriptions..." class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" onchange="document.getElementById('filterForm').submit()">
+                <input type="text" id="filterSearch" name="search" value="<?= e($filterSearch) ?>" placeholder="Search descriptions..." class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500" onchange="this.form.submit()">
             </div>
             <div class="w-full md:w-auto">
                 <label for="filterType" class="block text-sm font-semibold text-slate-700 mb-2">Type</label>
-                <select id="filterType" onchange="document.getElementById('filterForm').submit()" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                    <option value="">All Transactions</option>
+                <select id="filterType" name="filter_type" onchange="this.form.submit()" class="w-full px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                    <option value="" <?= $filterType === '' ? 'selected' : '' ?>>All Transactions</option>
                     <option value="deposit" <?= e($filterType === 'deposit' ? 'selected' : '') ?>>Deposits</option>
                     <option value="withdrawal" <?= e($filterType === 'withdrawal' ? 'selected' : '') ?>>Withdrawals</option>
                     <option value="redemption" <?= e($filterType === 'redemption' ? 'selected' : '') ?>>Redemptions</option>
                     <option value="adjustment" <?= e($filterType === 'adjustment' ? 'selected' : '') ?>>Adjustments</option>
                 </select>
             </div>
-            <form id="filterForm" method="get" class="hidden">
-                <input type="hidden" name="filter_type" value="<?= e($filterType) ?>">
-                <input type="hidden" name="search" value="<?= e($filterSearch) ?>">
-            </form>
-        </div>
+        </form>
 
         <!-- Transactions List -->
         <?php if ($transactions): ?>
@@ -448,7 +444,7 @@ require __DIR__ . '/includes/header.php';
             <?php if ($page > 1 || $hasMore): ?>
                 <div class="mt-6 flex justify-between items-center">
                     <?php if ($page > 1): ?>
-                        <a href="?page=<?= e($page - 1) ?>&amp;filter_type=<?= e($filterType) ?>&amp;search=<?= e($filterSearch) ?>" class="text-emerald-600 hover:text-emerald-700 font-semibold">← Previous</a>
+                        <a href="?page=<?= e($page - 1) ?>&amp;filter_type=<?= e($filterType) ?>&amp;search=<?= e($filterSearch) ?>#transaction-history" class="text-emerald-600 hover:text-emerald-700 font-semibold">← Previous</a>
                     <?php else: ?>
                         <span class="text-slate-400">← Previous</span>
                     <?php endif; ?>
@@ -456,7 +452,7 @@ require __DIR__ . '/includes/header.php';
                     <span class="text-slate-600 text-sm">Page <?= e($page) ?></span>
 
                     <?php if ($hasMore): ?>
-                        <a href="?page=<?= e($page + 1) ?>&amp;filter_type=<?= e($filterType) ?>&amp;search=<?= e($filterSearch) ?>" class="text-emerald-600 hover:text-emerald-700 font-semibold">Next →</a>
+                        <a href="?page=<?= e($page + 1) ?>&amp;filter_type=<?= e($filterType) ?>&amp;search=<?= e($filterSearch) ?>#transaction-history" class="text-emerald-600 hover:text-emerald-700 font-semibold">Next →</a>
                     <?php else: ?>
                         <span class="text-slate-400">Next →</span>
                     <?php endif; ?>

@@ -1,5 +1,6 @@
 -- EcoCycle database schema + seed data
 -- MariaDB / MySQL. Charset utf8mb4.
+-- WARNING: this file drops and recreates every table. Use it only for a fresh install, never on a database with real data.
 
 SET FOREIGN_KEY_CHECKS = 0;
 
@@ -7,6 +8,7 @@ DROP TABLE IF EXISTS pin_reset_requests;
 DROP TABLE IF EXISTS password_resets;
 DROP TABLE IF EXISTS email_verifications;
 DROP TABLE IF EXISTS login_attempts;
+DROP TABLE IF EXISTS admin_password_reset_logs;
 DROP TABLE IF EXISTS withdrawal_audit_log;
 DROP TABLE IF EXISTS withdrawal_requests;
 DROP TABLE IF EXISTS saved_payout_methods;

@@ -6,7 +6,10 @@
   "scripts": {
     "start": "electron .",
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build:withdrawal-qr": "browserify assets/js/withdrawal-qr.js --standalone EcoCycleQR -o assets/js/withdrawal-qr.bundle.js"
+    "build:withdrawal-qr": "browserify assets/js/withdrawal-qr.js --standalone EcoCycleQR -o assets/js/withdrawal-qr.bundle.js",
+    "build:css": "tailwindcss -c tailwind.config.js -i assets/css/tailwind.input.css -o assets/css/tailwind.css --minify",
+    "copy:offline-assets": "node -e \"const fs=require('fs'); fs.mkdirSync('assets/fonts',{recursive:true}); fs.copyFileSync('node_modules/chart.js/dist/chart.umd.js','assets/js/chart.umd.js'); fs.copyFileSync('node_modules/@fontsource-variable/nunito/files/nunito-latin-wght-normal.woff2','assets/fonts/nunito-latin-wght-normal.woff2');\"",
+    "build:offline": "npm run build:css && npm run copy:offline-assets"
   },
   "keywords": [],
   "author": "",
@@ -14,6 +17,9 @@
   "type": "commonjs",
   "devDependencies": {
     "browserify": "^17.0.1",
+    "tailwindcss": "^3.4.17",
+    "chart.js": "4.4.1",
+    "@fontsource-variable/nunito": "^5.2.6",
     "electron": "^44.4.2",
     "electron-packager": "^17.1.2",
     "qrcode": "^1.5.4"

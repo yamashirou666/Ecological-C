@@ -487,8 +487,21 @@ if ($requestedStep === 'result' && is_array($terminalResult)) {
     $step = 'result';
 }
 
+$checkoutPayoutMethod = $request['payout_method']
+    ?? (is_array($completedVoucher) ? 'voucher' : $formValues['method']);
+$isGiftCardFlow = $checkoutPayoutMethod === 'voucher';
+$stepCount = $isGiftCardFlow ? 2 : 3;
+$currentStepNumber = match ($step) {
+    'review' => 2,
+    'authorization', 'result' => 3,
+    default => 1,
+};
+$finishedStepCount = in_array($step, ['complete', 'result'], true)
+    ? $stepCount
+    : $currentStepNumber - 1;
+
 $pageTitle = $step === 'payout'
-    ? 'PAYOUT METHOD, STEP 2'
+    ? 'Withdrawal — Payout Info'
     : ($step === 'authorization'
         ? 'Payout Authorization — EcoWallet'
         : ($step === 'result' ? 'Withdrawal Result — EcoWallet' : 'Review + Confirm — EcoWallet Checkout'));
@@ -497,10 +510,22 @@ require __DIR__ . '/includes/header.php';
 
 <main id="main" class="flex-1 max-w-6xl mx-auto px-4 py-8 w-full">
     <div class="checkout-topbar flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-8">
-        <nav class="checkout-steps flex items-center gap-2 sm:gap-4" aria-label="Withdrawal checkout steps">
-            <span class="<?= $step === 'payout' ? 'checkout-step-active' : 'checkout-step-muted' ?>" <?= $step === 'payout' ? 'aria-current="step"' : '' ?>>Payout Info</span>
-            <span class="checkout-step-separator" aria-hidden="true">›</span>
-            <span class="<?= in_array($step, ['review', 'authorization', 'complete', 'result'], true) ? 'checkout-step-active' : 'checkout-step-muted' ?>" <?= in_array($step, ['review', 'authorization', 'complete', 'result'], true) ? 'aria-current="step"' : '' ?>>Review + Confirm</span>
+        <nav class="checkout-steps flex flex-wrap items-center gap-1 sm:gap-2"
+             aria-label="Withdrawal checkout steps"
+             data-current-step="<?= (int) $currentStepNumber ?>"
+             data-step-count="<?= (int) $stepCount ?>"
+             data-finished-steps="<?= (int) $finishedStepCount ?>">
+            <span class="<?= $finishedStepCount >= 1 ? 'checkout-step-done' : ($currentStepNumber === 1 ? 'checkout-step-active' : 'checkout-step-muted') ?>"
+                  <?= $currentStepNumber === 1 && $finishedStepCount === 0 ? 'aria-current="step"' : '' ?>
+                  data-step-tab="1"><?= $finishedStepCount >= 1 ? '<span aria-hidden="true">✓</span> ' : '' ?>Payout Info</span>
+            <span class="checkout-step-separator" aria-hidden="true" data-step-separator="1">›</span>
+            <span class="<?= $finishedStepCount >= 2 ? 'checkout-step-done' : ($currentStepNumber === 2 ? 'checkout-step-active' : 'checkout-step-muted') ?>"
+                  <?= $currentStepNumber === 2 && $finishedStepCount < 2 ? 'aria-current="step"' : '' ?>
+                  data-step-tab="2"><?= $finishedStepCount >= 2 ? '<span aria-hidden="true">✓</span> ' : '' ?>Review + Confirm</span>
+            <span class="checkout-step-separator <?= $isGiftCardFlow ? 'hidden' : '' ?>" aria-hidden="true" data-step-separator="2">›</span>
+            <span class="<?= $finishedStepCount >= 3 ? 'checkout-step-done' : ($currentStepNumber === 3 ? 'checkout-step-active' : 'checkout-step-muted') ?> <?= $isGiftCardFlow ? 'hidden' : '' ?>"
+                  <?= $currentStepNumber === 3 && $finishedStepCount < 3 ? 'aria-current="step"' : '' ?>
+                  data-step-tab="3"><?= $finishedStepCount >= 3 ? '<span aria-hidden="true">✓</span> ' : '' ?>Authorize</span>
         </nav>
         <a href="wallet.php" class="checkout-logo" aria-label="EcoCycle home">
             <span class="brand-mark" aria-hidden="true">♻️</span>
@@ -552,6 +577,7 @@ require __DIR__ . '/includes/header.php';
             ? 'Authorized — finalizing your simulated payout.'
             : 'Pending — waiting for the one-time QR authorization.';
         ?>
+        <p class="checkout-kicker mb-2">STEP 3 OF 3</p>
         <h1 class="text-2xl sm:text-3xl font-extrabold mb-2">Payout Authorization</h1>
         <p class="checkout-muted mb-6">Authorize your simulated withdrawal using this one-time EcoCycle QR code.</p>
 
@@ -677,6 +703,7 @@ require __DIR__ . '/includes/header.php';
                 (!empty($request['account_last4']) ? ' ····' . $request['account_last4'] : ''));
         $username = (string) ($user['username'] ?? $user['name']);
         ?>
+        <p class="checkout-kicker mb-2">STEP 2 OF <?= $request['payout_method'] === 'voucher' ? '2' : '3' ?></p>
         <h1 class="text-2xl sm:text-3xl font-extrabold mb-2">Review + Confirm</h1>
         <p class="checkout-muted mb-6">Check your withdrawal details before confirming.</p>
 
@@ -773,7 +800,7 @@ require __DIR__ . '/includes/header.php';
     <?php else: ?>
         <div class="grid lg:grid-cols-[minmax(0,1fr)_19rem] gap-6 items-start">
             <section>
-                <p class="checkout-kicker mb-2">PAYOUT METHOD, STEP 2</p>
+                <p class="checkout-kicker mb-2" id="checkoutStepLabel">WITHDRAWAL, STEP 1 OF <?= $isGiftCardFlow ? '2' : '3' ?></p>
                 <h1 class="text-2xl sm:text-3xl font-extrabold mb-2">Payout Info</h1>
                 <p class="checkout-muted mb-6">Choose how you would like your simulated points withdrawal to be paid out.</p>
                 <p class="checkout-muted text-xs mb-5">
@@ -1070,6 +1097,23 @@ document.addEventListener('DOMContentLoaded', function () {
     };
     const savedSummary = document.getElementById('savedMethodSummary');
     const saveCheckbox = document.getElementById('savePayoutMethod');
+    const stepNavigation = document.querySelector('.checkout-steps');
+    const stepLabel = document.getElementById('checkoutStepLabel');
+
+    function updateStepIndicator() {
+        const isGiftCard = method.value === 'voucher';
+        const stepCount = isGiftCard ? '2' : '3';
+        if (stepLabel) {
+            stepLabel.textContent = 'WITHDRAWAL, STEP 1 OF ' + stepCount;
+        }
+        if (stepNavigation) {
+            stepNavigation.dataset.stepCount = stepCount;
+            const authorizeTab = stepNavigation.querySelector('[data-step-tab="3"]');
+            const authorizeSeparator = stepNavigation.querySelector('[data-step-separator="2"]');
+            if (authorizeTab) authorizeTab.classList.toggle('hidden', isGiftCard);
+            if (authorizeSeparator) authorizeSeparator.classList.toggle('hidden', isGiftCard);
+        }
+    }
 
     function inputsFor(container) {
         return Array.from(container.querySelectorAll('input, select'));
@@ -1103,6 +1147,7 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function updateFields() {
+        updateStepIndicator();
         Object.keys(methodFields).forEach(function (key) {
             const active = key === method.value;
             methodFields[key].classList.toggle('hidden', !active);

@@ -1,4 +1,4 @@
-/* EcoCycle — small custom touches layered on top of Tailwind (CDN). */
+/* EcoCycle — small custom touches layered on top of the local Tailwind build. */
 
 :root {
     --color-bg: #f7faf7;
@@ -168,14 +168,30 @@ html[data-theme="light"] .nav-shell {
 .nav-signup {
     padding: 0.65rem 1rem;
     font-weight: 800;
-    color: #062b1a;
-    background: linear-gradient(135deg, #ecfdf5, #bbf7d0);
-    box-shadow: 0 10px 18px rgba(20, 83, 45, 0.2);
+    color: rgba(242, 255, 244, 0.75);
+    background: transparent;
+    box-shadow: none;
 }
 
-.nav-signup:hover {
+.nav-login,
+.nav-signup {
+    transition: color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.nav-login:hover,
+.nav-login:focus-visible,
+.nav-signup:hover,
+.nav-signup:focus-visible {
     transform: translateY(-1px);
-    box-shadow: 0 12px 20px rgba(20, 83, 45, 0.25);
+    color: #062b1a;
+    background: linear-gradient(135deg, #ecfdf5, #bbf7d0);
+    box-shadow: 0 12px 20px rgba(20, 83, 45, 0.3), 0 0 0 2px rgba(187, 247, 208, 0.2);
+}
+
+.nav-login:focus-visible,
+.nav-signup:focus-visible {
+    outline: 2px solid #bbf7d0;
+    outline-offset: 3px;
 }
 
 html[data-theme="dark"] .nav-shell {
@@ -200,8 +216,17 @@ html[data-theme="dark"] .nav-link-active {
 
 html[data-theme="dark"] .nav-profile,
 html[data-theme="dark"] .nav-logout,
-html[data-theme="dark"] .nav-login {
+html[data-theme="dark"] .nav-login,
+html[data-theme="dark"] .nav-signup {
     color: rgba(232, 240, 236, 0.9);
+}
+
+html[data-theme="dark"] .nav-login:hover,
+html[data-theme="dark"] .nav-login:focus-visible,
+html[data-theme="dark"] .nav-signup:hover,
+html[data-theme="dark"] .nav-signup:focus-visible {
+    color: #062b1a;
+    background: linear-gradient(135deg, #ecfdf5, #bbf7d0);
 }
 
 header {
@@ -769,13 +794,14 @@ html[data-theme="dark"] .wallet-secondary-button:hover {
 }
 
 .checkout-step-active,
-.checkout-step-muted {
+.checkout-step-muted,
+.checkout-step-done {
     display: inline-flex;
     align-items: center;
     min-height: 2.65rem;
     border-radius: 0.75rem;
-    padding: 0.55rem 0.85rem;
-    font-size: 0.875rem;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.8rem;
     font-weight: 800;
 }
 
@@ -789,6 +815,19 @@ html[data-theme="dark"] .wallet-secondary-button:hover {
 .checkout-step-separator {
     color: var(--color-text-muted);
     opacity: 0.7;
+}
+
+.checkout-step-done {
+    color: #166534;
+    background: rgba(220, 252, 231, 0.62);
+    box-shadow: inset 0 0 0 1px rgba(22, 101, 52, 0.14);
+}
+
+.checkout-steps .checkout-step-active.hidden,
+.checkout-steps .checkout-step-muted.hidden,
+.checkout-steps .checkout-step-done.hidden,
+.checkout-steps .checkout-step-separator.hidden {
+    display: none;
 }
 
 .checkout-step-separator {
@@ -1034,6 +1073,12 @@ html[data-theme="dark"] .checkout-step-active {
     color: #d8ffe5;
     background: rgba(34, 197, 94, 0.16);
     box-shadow: inset 0 0 0 1px rgba(92, 225, 142, 0.3);
+}
+
+html[data-theme="dark"] .checkout-step-done {
+    color: #c5f7d4;
+    background: rgba(34, 197, 94, 0.1);
+    box-shadow: inset 0 0 0 1px rgba(92, 225, 142, 0.18);
 }
 
 html[data-theme="dark"] .checkout-primary-button {

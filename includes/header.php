@@ -27,28 +27,7 @@ function navLink(string $href, string $label, string $active): string
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description" content="EcoCycle — a community recycling rewards platform advancing UN SDG 12.">
     <title><?= e($title) ?></title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        eco: {
-                            50: '#f0fdf4', 100: '#dcfce7', 200: '#bbf7d0', 300: '#86efac',
-                            400: '#4ade80', 500: '#22c55e', 600: '#16a34a', 700: '#15803d',
-                            800: '#166534', 900: '#14532d'
-                        },
-                        earth: { 100: '#f5f0e6', 300: '#d8c7a8', 500: '#a9855f', 700: '#7c5c3b' }
-                    },
-                    fontFamily: {
-                        sans: ['Nunito', 'ui-sans-serif', 'system-ui', 'sans-serif']
-                    }
-                }
-            }
-        }
-    </script>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/tailwind.css?v=<?= (int) filemtime(__DIR__ . '/../assets/css/tailwind.css') ?>">
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>♻️</text></svg>">
     <link rel="stylesheet" href="assets/css/style.css?v=<?= (int) filemtime(__DIR__ . '/../assets/css/style.css') ?>">
     <script>

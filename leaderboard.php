@@ -11,28 +11,35 @@ $scope = ($_GET['scope'] ?? 'people') === 'neighborhood' ? 'neighborhood' : 'peo
 if ($scope === 'people') {
     // Top individuals by lifetime points, joined with recycled weight.
     $rows = db()->query(
-        'SELECT u.id, u.name, u.neighborhood, u.total_points, u.streak_count,
+        "SELECT u.id, u.name,
+                COALESCE(NULLIF(TRIM(u.neighborhood), ''), 'Unassigned') AS neighborhood,
+                u.total_points, u.streak_count,
                 COALESCE(SUM(l.weight_kg), 0) AS total_kg
            FROM users u
            LEFT JOIN recycling_logs l ON l.user_id = u.id
           GROUP BY u.id
           ORDER BY u.total_points DESC, total_kg DESC
-          LIMIT 50'
+          LIMIT 50"
     )->fetchAll();
 } else {
     // Aggregate by neighborhood.
     $rows = db()->query(
-        'SELECT u.neighborhood,
+        "SELECT COALESCE(NULLIF(TRIM(u.neighborhood), ''), 'Unassigned') AS neighborhood,
                 COUNT(DISTINCT u.id)          AS members,
                 COALESCE(SUM(l.weight_kg), 0) AS total_kg,
                 COALESCE(SUM(l.co2_saved_kg), 0) AS total_co2,
                 COALESCE(SUM(u.total_points), 0) AS total_points
            FROM users u
            LEFT JOIN recycling_logs l ON l.user_id = u.id
-          GROUP BY u.neighborhood
+          GROUP BY COALESCE(NULLIF(TRIM(u.neighborhood), ''), 'Unassigned')
           ORDER BY total_kg DESC, total_points DESC
-          LIMIT 50'
+          LIMIT 50"
     )->fetchAll();
+}
+
+$userNeighborhood = $user ? trim((string) $user['neighborhood']) : '';
+if ($userNeighborhood === '') {
+    $userNeighborhood = 'Unassigned';
 }
 
 $medals = ['🥇', '🥈', '🥉'];
@@ -79,7 +86,7 @@ require __DIR__ . '/includes/header.php';
         <?php else: ?>
             <ul class="divide-y divide-slate-50">
                 <?php foreach ($rows as $i => $row):
-                    $isMine = $user && $user['neighborhood'] === $row['neighborhood']; ?>
+                    $isMine = $user && $userNeighborhood === $row['neighborhood']; ?>
                     <li class="flex items-center gap-4 px-5 py-4 <?= e($isMine ? 'bg-eco-50' : '') ?>">
                         <div class="w-8 text-center font-extrabold text-slate-400 shrink-0"><?= e($i < 3 ? $medals[$i] : ($i + 1)) ?></div>
                         <div class="w-10 h-10 rounded-full bg-eco-100 text-eco-700 grid place-items-center text-lg shrink-0" aria-hidden="true">🏘️</div>

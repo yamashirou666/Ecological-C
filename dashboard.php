@@ -156,7 +156,7 @@ require __DIR__ . '/includes/header.php';
 </section>
 
 <?php if ((int) $totals['total_logs'] > 0): ?>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script src="assets/js/chart.umd.js"></script>
 <script>
     (function () {
         const isDark = document.documentElement.getAttribute('data-theme') === 'dark';

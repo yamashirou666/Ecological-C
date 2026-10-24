@@ -13,7 +13,7 @@ function configureSecurityHeaders(): void
         return;
     }
 
-    header("Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.tailwindcss.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self' https://api.pwnedpasswords.com");
+    header("Content-Security-Policy: default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; connect-src 'self'");
     header('X-Frame-Options: DENY');
     header('X-Content-Type-Options: nosniff');
     header('Referrer-Policy: strict-origin-when-cross-origin');
@@ -578,6 +578,12 @@ function recordRecyclingLog(int $userId, string $material, int $quantity, float 
     if (!isset($catalogue[$material])) {
         throw new InvalidArgumentException('Unknown material type.');
     }
+    if ($weightKg <= 0 || $weightKg > RECYCLING_MAX_KG_PER_ENTRY) {
+        throw new InvalidArgumentException(
+            'Recycling weight must be greater than 0 and no more than '
+            . num(RECYCLING_MAX_KG_PER_ENTRY) . ' kg per entry.'
+        );
+    }
     $meta = $catalogue[$material];
 
     $points = (int) round($weightKg * $meta['points_per_kg']);
@@ -586,6 +592,28 @@ function recordRecyclingLog(int $userId, string $material, int $quantity, float 
     $pdo = db();
     $pdo->beginTransaction();
     try {
+        $userStmt = $pdo->prepare('SELECT streak_count, last_log_date FROM users WHERE id = ? FOR UPDATE');
+        $userStmt->execute([$userId]);
+        $user = $userStmt->fetch();
+        if (!$user) {
+            throw new RuntimeException('User not found.');
+        }
+
+        $dailyPointsStmt = $pdo->prepare(
+            'SELECT COALESCE(SUM(points_awarded), 0)
+               FROM recycling_logs
+              WHERE user_id = ? AND created_at >= CURDATE()'
+        );
+        $dailyPointsStmt->execute([$userId]);
+        $pointsEarnedToday = (int) $dailyPointsStmt->fetchColumn();
+        if ($pointsEarnedToday + $points > RECYCLING_DAILY_POINT_CAP) {
+            throw new DomainException(sprintf(
+                'You have earned %s of %s recycling points today. This entry would exceed the daily cap.',
+                num($pointsEarnedToday),
+                num(RECYCLING_DAILY_POINT_CAP)
+            ));
+        }
+
         $stmt = $pdo->prepare(
             'INSERT INTO recycling_logs (user_id, material_type, quantity, weight_kg, points_awarded, co2_saved_kg, note)
              VALUES (?, ?, ?, ?, ?, ?, ?)'
@@ -594,12 +622,6 @@ function recordRecyclingLog(int $userId, string $material, int $quantity, float 
         $logId = (int) $pdo->lastInsertId();
 
         // Streak: increment if last log was yesterday, reset to 1 if older, keep if today.
-        $userStmt = $pdo->prepare('SELECT streak_count, last_log_date FROM users WHERE id = ? FOR UPDATE');
-        $userStmt->execute([$userId]);
-        $user = $userStmt->fetch();
-        if (!$user) {
-            throw new RuntimeException('User not found.');
-        }
         $today = new DateTimeImmutable('today');
         $streak = 1;
         if (!empty($user['last_log_date'])) {
@@ -1973,10 +1995,10 @@ function generateReceipt(array $transaction, int $userId): string
     $user = $stmt->fetch();
     $receipt = json_decode($transaction['receipt_data'] ?? '{}', true);
     
-    $html = '<div style="font-family:monospace; max-width:400px; margin:20px auto; border:1px solid #ddd; padding:20px; border-radius:8px; background:#f9f9f9;">';
+    $html = '<div style="font-family:monospace; max-width:400px; margin:20px auto; border:1px solid #d1d5db; padding:20px; border-radius:8px; background:#f9fafb; color:#1f2937;">';
     $html .= '<div style="text-align:center; margin-bottom:20px;">';
-    $html .= '<h2 style="margin:0; font-size:24px;">🌱 EcoCycle</h2>';
-    $html .= '<p style="margin:5px 0; color:#666;">Digital Transaction Receipt</p>';
+    $html .= '<h2 style="margin:0; font-size:24px; color:#166534;">🌱 EcoCycle</h2>';
+    $html .= '<p style="margin:5px 0; color:#475569;">Digital Transaction Receipt</p>';
     $html .= '</div>';
     
     $html .= '<div style="border-top:1px solid #ddd; border-bottom:1px solid #ddd; padding:15px 0; margin:15px 0;">';
@@ -1992,7 +2014,7 @@ function generateReceipt(array $transaction, int $userId): string
     $html .= '</div>';
     
     if (!empty($receipt)) {
-        $html .= '<div style="font-size:12px; color:#666; line-height:1.6;">';
+        $html .= '<div style="font-size:12px; color:#475569; line-height:1.6;">';
         $html .= '<p style="margin:10px 0 5px 0;"><strong>Details:</strong></p>';
         if (!empty($receipt['source'])) {
             $html .= '<p style="margin:3px 0;">📌 ' . e($receipt['source']) . '</p>';
@@ -2012,7 +2034,7 @@ function generateReceipt(array $transaction, int $userId): string
         $html .= '</div>';
     }
     
-    $html .= '<div style="text-align:center; margin-top:20px; padding-top:15px; border-top:1px solid #ddd; font-size:11px; color:#999;">';
+    $html .= '<div style="text-align:center; margin-top:20px; padding-top:15px; border-top:1px solid #d1d5db; font-size:11px; color:#64748b;">';
     $html .= '<p>This is a digital receipt for your records.<br>EcoCycle • Advancing UN SDG 12</p>';
     $html .= '</div>';
     $html .= '</div>';

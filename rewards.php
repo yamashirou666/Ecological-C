@@ -11,6 +11,8 @@ $errors = [];
 $success = [];
 $showPinModal = false;
 $pendingRedemption = null;
+$verificationRequired = false;
+$emailVerified = !$user || !EMAIL_FEATURES_ENABLED || !empty($user['email_verified_at']);
 
 // Handle a redemption POST with PIN verification.
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -22,34 +24,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     $action = $_POST['action'] ?? '';
-    
+
     if ($action === 'initiate_redemption') {
         // First step: validate reward and prompt for PIN
         $rewardId = (int) ($_POST['reward_id'] ?? 0);
-        $pdo = db();
-        
-        $stmt = $pdo->prepare('SELECT * FROM rewards WHERE id = ?');
-        $stmt->execute([$rewardId]);
-        $reward = $stmt->fetch();
-        
-        $stmt = $pdo->prepare('SELECT points_balance FROM users WHERE id = ?');
-        $stmt->execute([$user['id']]);
-        $userBalance = (int) $stmt->fetchColumn();
-
-        if (!$reward) {
-            $errors[] = 'That reward is no longer available.';
-        } elseif ((int) $reward['quantity_available'] <= 0) {
-            $errors[] = 'Sorry, that reward is out of stock.';
-        } elseif ($userBalance < (int) $reward['points_cost']) {
-            $errors[] = 'You need ' . num((int) $reward['points_cost'] - $userBalance) . ' more points to redeem this.';
+        if (EMAIL_FEATURES_ENABLED && !$emailVerified) {
+            $verificationRequired = true;
+            $errors[] = 'Verify your email address before redeeming rewards.';
         } else {
-            // Reward is valid - prompt for PIN
-            $wallet = getUserWallet((int) $user['id']);
-            if (!$wallet || !$wallet['pin_hash']) {
-                $errors[] = 'Please set up a wallet PIN first to redeem rewards.';
+            $pdo = db();
+            $stmt = $pdo->prepare('SELECT * FROM rewards WHERE id = ?');
+            $stmt->execute([$rewardId]);
+            $reward = $stmt->fetch();
+
+            $stmt = $pdo->prepare('SELECT points_balance FROM users WHERE id = ?');
+            $stmt->execute([$user['id']]);
+            $userBalance = (int) $stmt->fetchColumn();
+
+            if (!$reward) {
+                $errors[] = 'That reward is no longer available.';
+            } elseif ((int) $reward['quantity_available'] <= 0) {
+                $errors[] = 'Sorry, that reward is out of stock.';
+            } elseif ($userBalance < (int) $reward['points_cost']) {
+                $errors[] = 'You need ' . num((int) $reward['points_cost'] - $userBalance) . ' more points to redeem this.';
             } else {
-                $showPinModal = true;
-                $pendingRedemption = ['reward_id' => $rewardId, 'reward' => $reward];
+                // Reward is valid - prompt for PIN
+                $wallet = getUserWallet((int) $user['id']);
+                if (!$wallet || !$wallet['pin_hash']) {
+                    $errors[] = 'Please set up a wallet PIN first to redeem rewards.';
+                } else {
+                    $showPinModal = true;
+                    $pendingRedemption = ['reward_id' => $rewardId, 'reward' => $reward];
+                }
             }
         }
     } elseif ($action === 'confirm_redemption') {
@@ -70,11 +76,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo = db();
             $pdo->beginTransaction();
             try {
-                $uStmt = $pdo->prepare('SELECT id, points_balance FROM users WHERE id = ? FOR UPDATE');
+                $uStmt = $pdo->prepare('SELECT id, points_balance, email_verified_at FROM users WHERE id = ? FOR UPDATE');
                 $uStmt->execute([$user['id']]);
                 $lockedUser = $uStmt->fetch();
                 if (!$lockedUser) {
                     throw new RuntimeException('That account could not be found.');
+                }
+                if (EMAIL_FEATURES_ENABLED && empty($lockedUser['email_verified_at'])) {
+                    $verificationRequired = true;
+                    throw new RuntimeException('Email verification is required before reward redemption.');
                 }
 
                 $walletStmt = $pdo->prepare('SELECT * FROM wallets WHERE user_id = ? FOR UPDATE');
@@ -134,8 +144,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($pdo->inTransaction()) {
                     $pdo->rollBack();
                 }
-                error_log('Reward redemption failed for user ' . (int) $user['id'] . ': ' . $ex->getMessage());
-                setFlash('error', 'The redemption could not be completed. Please try again.');
+                if ($verificationRequired) {
+                    $errors[] = 'Verify your email address before redeeming rewards.';
+                } else {
+                    error_log('Reward redemption failed for user ' . (int) $user['id'] . ': ' . $ex->getMessage());
+                    setFlash('error', 'The redemption could not be completed. Please try again.');
+                }
             }
         }
 
@@ -178,6 +192,9 @@ require __DIR__ . '/includes/header.php';
             <ul class="space-y-1">
                 <?php foreach ($errors as $err): ?><li>• <?= e($err) ?></li><?php endforeach; ?>
             </ul>
+            <?php if ($verificationRequired): ?>
+                <a href="resend_verification.php" class="mt-2 inline-block font-bold underline">Resend verification email</a>
+            <?php endif; ?>
         </div>
     <?php endif; ?>
 
@@ -186,6 +203,12 @@ require __DIR__ . '/includes/header.php';
             <span class="eco-kicker">Rewards</span>
             <h1 class="mt-4 text-2xl font-extrabold text-slate-900">Rewards marketplace 🎁</h1>
             <p class="mt-1 text-slate-600">Turn your EcoPoints into real local rewards and green donations.</p>
+            <?php if (EMAIL_FEATURES_ENABLED && $user && !$emailVerified): ?>
+                <p class="mt-2 text-sm font-semibold text-amber-800" role="status">
+                    Verify your email address before redeeming rewards.
+                    <a href="resend_verification.php" class="underline">Resend verification email</a>
+                </p>
+            <?php endif; ?>
         </div>
         <?php if ($user): ?>
             <div class="eco-panel px-5 py-3 text-center">
@@ -211,7 +234,7 @@ require __DIR__ . '/includes/header.php';
     <!-- Reward cards -->
     <div class="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         <?php foreach ($rewards as $reward):
-            $affordable = $user && $balance >= (int) $reward['points_cost'];
+            $affordable = $user && $emailVerified && $balance >= (int) $reward['points_cost'];
             $inStock    = (int) $reward['quantity_available'] > 0; ?>
             <div class="reward-card p-6 flex flex-col">
                 <div class="flex items-start justify-between">
@@ -240,7 +263,7 @@ require __DIR__ . '/includes/header.php';
                         <input type="hidden" name="reward_id" value="<?= (int) $reward['id'] ?>">
                         <button type="submit" <?= e($affordable ? '' : 'disabled') ?>
                             class="w-full py-2.5 rounded-xl font-bold transition <?= e($affordable ? 'bg-eco-600 text-white hover:bg-eco-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed') ?>">
-                            <?= e($affordable ? 'Redeem' : 'Need ' . num((int) $reward['points_cost'] - $balance) . ' more pts') ?>
+                            <?= e(!$emailVerified ? 'Verify email to redeem' : ($affordable ? 'Redeem' : 'Need ' . num((int) $reward['points_cost'] - $balance) . ' more pts')) ?>
                         </button>
                     </form>
                 <?php endif; ?>

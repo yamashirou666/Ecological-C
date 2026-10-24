@@ -31,7 +31,7 @@ defined('ECOCYCLE_APP_KEY') || define(
     'ECOCYCLE_APP_KEY',
     $configValue($secretConfig, 'app_key', 'ECOCYCLE_APP_KEY', '')
 );
-defined('EMAIL_FEATURES_ENABLED') || define('EMAIL_FEATURES_ENABLED', false);
+defined('EMAIL_FEATURES_ENABLED') || define('EMAIL_FEATURES_ENABLED', true);
 defined('APP_BASE_URL') || define(
     'APP_BASE_URL',
     rtrim($configValue($secretConfig, 'app_base_url', 'ECOCYCLE_APP_BASE_URL', 'http://localhost/Project%20EchoCycle'), '/')
@@ -56,6 +56,8 @@ const WALLET_DAILY_WITHDRAWAL_CAP = 5000;
 const WALLET_WITHDRAWAL_EXPIRY_MINUTES = 10;
 const PIN_RESET_COOLDOWN_HOURS = 24;
 const WALLET_CHECKOUT_ENABLED = true;
+const RECYCLING_DAILY_POINT_CAP = 3000;
+const RECYCLING_MAX_KG_PER_ENTRY = 100;
 
 date_default_timezone_set(APP_TIMEZONE);
 

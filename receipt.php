@@ -59,10 +59,10 @@ if ($action === 'receipt' && $transactionId) {
             <a href="?action=receipt&amp;txn_id=<?= e($transactionId) ?>&amp;format=pdf" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-6 py-3 rounded-lg transition">
                 📥 Download as HTML
             </a>
-            <button onclick="window.print()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold px-6 py-3 rounded-lg transition">
+            <button onclick="window.print()" class="wallet-secondary-button font-bold px-6 py-3 rounded-lg transition">
                 🖨 Print Receipt
             </button>
-            <a href="wallet.php" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold px-6 py-3 rounded-lg transition">
+            <a href="wallet.php" class="wallet-secondary-button font-bold px-6 py-3 rounded-lg transition">
                 Back
             </a>
         </div>
