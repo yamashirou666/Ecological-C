@@ -70,17 +70,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo = db();
             $pdo->beginTransaction();
             try {
-                // Lock and re-read reward
+                $uStmt = $pdo->prepare('SELECT id, points_balance FROM users WHERE id = ? FOR UPDATE');
+                $uStmt->execute([$user['id']]);
+                $lockedUser = $uStmt->fetch();
+                if (!$lockedUser) {
+                    throw new RuntimeException('That account could not be found.');
+                }
+
+                $walletStmt = $pdo->prepare('SELECT * FROM wallets WHERE user_id = ? FOR UPDATE');
+                $walletStmt->execute([$user['id']]);
+                $lockedWallet = $walletStmt->fetch();
+
                 $rStmt = $pdo->prepare('SELECT * FROM rewards WHERE id = ? FOR UPDATE');
                 $rStmt->execute([$rewardId]);
                 $reward = $rStmt->fetch();
-
-                $uStmt = $pdo->prepare('SELECT points_balance FROM users WHERE id = ? FOR UPDATE');
-                $uStmt->execute([$user['id']]);
-                $balance = (int) $uStmt->fetchColumn();
+                $balance = (int) $lockedUser['points_balance'];
 
                 if (!$reward) {
                     throw new RuntimeException('That reward is no longer available.');
+                }
+                if (!$lockedWallet) {
+                    throw new RuntimeException('Please set up a wallet PIN first to redeem rewards.');
                 }
                 if ((int) $reward['quantity_available'] <= 0) {
                     throw new RuntimeException('Sorry, that reward is out of stock.');
@@ -96,36 +106,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $chk->execute([$code]);
                 } while ($chk->fetchColumn());
 
-                // Create redemption in users table
+                $pointsCost = (int) $reward['points_cost'];
                 $pdo->prepare('INSERT INTO redemptions (user_id, reward_id, redemption_code, points_spent) VALUES (?, ?, ?, ?)')
-                    ->execute([$user['id'], $rewardId, $code, $reward['points_cost']]);
-                
-                // Deduct from user points
-                $pdo->prepare('UPDATE users SET points_balance = points_balance - ? WHERE id = ?')
-                    ->execute([$reward['points_cost'], $user['id']]);
-                
-                // Reduce reward stock
+                    ->execute([$user['id'], $rewardId, $code, $pointsCost]);
+
+                $transaction = createRedemptionTransaction(
+                    (int) $user['id'],
+                    $pointsCost,
+                    $reward['title']
+                );
                 $pdo->prepare('UPDATE rewards SET quantity_available = quantity_available - 1 WHERE id = ?')
                     ->execute([$rewardId]);
 
-                // Create wallet transaction (redemption type)
+                $pdo->commit();
                 try {
-                    createRedemptionTransaction((int) $user['id'], (int) $reward['points_cost'], $reward['title']);
                     sendWalletNotification((int) $user['id'], 'redemption', [
-                        'amount' => (int) $reward['points_cost'],
+                        'amount' => $pointsCost,
                         'reward' => $reward['title'],
                         'code' => $code,
-                        'new_balance' => $balance - (int) $reward['points_cost']
+                        'new_balance' => $transaction['balance_after'],
                     ]);
-                } catch (Exception $walletEx) {
-                    // Log but don't fail if wallet transaction fails (wallet might not exist for old users)
+                } catch (Throwable $notificationError) {
+                    error_log('Reward notification failed for user ' . (int) $user['id'] . ': ' . $notificationError->getMessage());
                 }
-
-                $pdo->commit();
                 setFlash('success', 'Redeemed! Your code is ' . $code . ' — show it at ' . $reward['title'] . '. See it any time on your profile.');
             } catch (Throwable $ex) {
-                $pdo->rollBack();
-                setFlash('error', $ex->getMessage());
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                error_log('Reward redemption failed for user ' . (int) $user['id'] . ': ' . $ex->getMessage());
+                setFlash('error', 'The redemption could not be completed. Please try again.');
             }
         }
 

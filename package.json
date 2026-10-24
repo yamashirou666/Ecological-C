@@ -5,15 +5,18 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build:withdrawal-qr": "browserify assets/js/withdrawal-qr.js --standalone EcoCycleQR -o assets/js/withdrawal-qr.bundle.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "devDependencies": {
+    "browserify": "^17.0.1",
     "electron": "^44.4.2",
-    "electron-packager": "^17.1.2"
+    "electron-packager": "^17.1.2",
+    "qrcode": "^1.5.4"
   },
   "dependencies": {
     "debug": "^4.4.3",

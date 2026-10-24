@@ -160,6 +160,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 setFlash('error', 'The password could not be reset. Please try again.');
             }
         }
+    } elseif ($action === 'reset_wallet_pin') {
+        $targetStmt = $pdo->prepare('SELECT id, name FROM users WHERE id = ?');
+        $targetStmt->execute([$targetId]);
+        $target = $targetStmt->fetch();
+        if (!$target) {
+            setFlash('error', 'That user could not be found.');
+        } else {
+            try {
+                resetWalletPin($targetId, null, (int) $admin['id']);
+                try {
+                    sendWalletPinChangedNotice($targetId);
+                } catch (Throwable $mailError) {
+                    error_log('Admin wallet PIN reset notice could not be sent for user ' . $targetId . ': ' . $mailError->getMessage());
+                }
+                $cooldownUntil = getWalletPinResetCooldownUntil($targetId);
+                $message = 'Wallet PIN cleared for ' . $target['name'] . '. Open requests were cancelled and reserved points released.';
+                if ($cooldownUntil !== null) {
+                    $message .= ' Withdrawals are on hold until '
+                        . date('M j, Y g:i A', strtotime($cooldownUntil)) . ' (' . APP_TIMEZONE . ' time).';
+                }
+                setFlash('success', $message);
+            } catch (Throwable $ex) {
+                error_log('Admin wallet PIN reset failed for target ' . $targetId . ': ' . $ex->getMessage());
+                setFlash('error', 'The wallet PIN could not be reset. Please try again.');
+            }
+        }
     } elseif ($action === 'promote' || $action === 'demote') {
         $makeAdmin = $action === 'promote' ? 1 : 0;
 
@@ -392,6 +418,11 @@ require __DIR__ . '/includes/header.php';
                                             class="text-xs font-semibold text-amber-700 hover:underline"
                                             onclick="return confirm('Generate a temporary password for this user? Their other sessions will be invalidated.');">
                                         Reset password
+                                    </button>
+                                    <button type="submit" name="action" value="reset_wallet_pin"
+                                            class="text-xs font-semibold text-amber-700 hover:underline"
+                                            onclick="return confirm('Clear this user’s wallet PIN, cancel open withdrawals, and start the withdrawal cooling-off period?');">
+                                        Reset wallet PIN
                                     </button>
                                 </form>
                             </td>

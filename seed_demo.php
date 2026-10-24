@@ -45,52 +45,76 @@ $hash = hashPassword($demoPassword);
 $created = 0;
 
 foreach ($demos as [$name, $email, $hood]) {
-    // Remove any prior demo user with this email (cascades logs/redemptions).
-    $pdo->prepare('DELETE FROM users WHERE email = ?')->execute([$email]);
+    $pdo->beginTransaction();
+    try {
+        // Remove any prior demo user with this email (cascades logs/redemptions).
+        $pdo->prepare('DELETE FROM users WHERE email = ?')->execute([$email]);
 
-    $usernameBase = strtolower(substr(preg_replace('/[^A-Za-z0-9]/', '', $name), 0, 12));
-    $username = $usernameBase;
-    $suffix = 1;
-    $usernameCheck = $pdo->prepare('SELECT 1 FROM users WHERE username = ? LIMIT 1');
-    while (true) {
-        $usernameCheck->execute([$username]);
-        if (!$usernameCheck->fetchColumn()) {
-            break;
+        $usernameBase = strtolower(substr(preg_replace('/[^A-Za-z0-9]/', '', $name), 0, 12));
+        $username = $usernameBase;
+        $suffix = 1;
+        $usernameCheck = $pdo->prepare('SELECT 1 FROM users WHERE username = ? LIMIT 1');
+        while (true) {
+            $usernameCheck->execute([$username]);
+            if (!$usernameCheck->fetchColumn()) {
+                break;
+            }
+            $suffixText = (string) $suffix;
+            $username = substr($usernameBase, 0, 12 - strlen($suffixText)) . $suffixText;
+            $suffix++;
         }
-        $suffixText = (string) $suffix;
-        $username = substr($usernameBase, 0, 12 - strlen($suffixText)) . $suffixText;
-        $suffix++;
-    }
-
-    $pdo->prepare(
-        'INSERT INTO users (name, username, email, password_hash, neighborhood) VALUES (?,?,?,?,?)'
-    )->execute([$name, $username, $email, $hash, $hood]);
-    $uid = (int) $pdo->lastInsertId();
-
-    // Generate a random-but-plausible history over the past ~20 days.
-    $logCount = random_int(6, 16);
-    for ($i = 0; $i < $logCount; $i++) {
-        $material = $materialKeys[array_rand($materialKeys)];
-        $meta     = materials()[$material];
-        $weight   = round(random_int(20, 400) / 100, 2); // 0.20–4.00 kg
-        $points   = (int) round($weight * $meta['points_per_kg']);
-        $co2      = round($weight * $meta['co2_per_kg'], 2);
-        $daysAgo  = random_int(0, 20);
 
         $pdo->prepare(
-            'INSERT INTO recycling_logs (user_id, material_type, quantity, weight_kg, points_awarded, co2_saved_kg, created_at)
-             VALUES (?,?,?,?,?,?, (NOW() - INTERVAL ? DAY))'
-        )->execute([$uid, $material, 1, $weight, $points, $co2, $daysAgo]);
+            'INSERT INTO users (name, username, email, password_hash, neighborhood) VALUES (?,?,?,?,?)'
+        )->execute([$name, $username, $email, $hash, $hood]);
+        $uid = (int) $pdo->lastInsertId();
+
+        // Generate a random-but-plausible history over the past ~20 days.
+        $logCount = random_int(6, 16);
+        for ($i = 0; $i < $logCount; $i++) {
+            $material = $materialKeys[array_rand($materialKeys)];
+            $meta     = materials()[$material];
+            $weight   = round(random_int(20, 400) / 100, 2); // 0.20–4.00 kg
+            $points   = (int) round($weight * $meta['points_per_kg']);
+            $co2      = round($weight * $meta['co2_per_kg'], 2);
+            $daysAgo  = random_int(0, 20);
+
+            $pdo->prepare(
+                'INSERT INTO recycling_logs (user_id, material_type, quantity, weight_kg, points_awarded, co2_saved_kg, created_at)
+                 VALUES (?,?,?,?,?,?, (NOW() - INTERVAL ? DAY))'
+            )->execute([$uid, $material, 1, $weight, $points, $co2, $daysAgo]);
+            $logId = (int) $pdo->lastInsertId();
+
+            $materialLabel = $meta['label'];
+            adjustPoints(
+                $uid,
+                $points,
+                'deposit',
+                "Verified $materialLabel recycling drop-off",
+                [
+                    'source' => "Verified $materialLabel recycling (1 item, {$weight} kg)",
+                    'log_id' => $logId,
+                ],
+                'earned'
+            );
+        }
+
+        $pdo->prepare('UPDATE users SET streak_count = ? WHERE id = ?')
+            ->execute([random_int(1, 9), $uid]);
+        $sumStmt = $pdo->prepare('SELECT COALESCE(SUM(points_awarded),0) FROM recycling_logs WHERE user_id = ?');
+        $sumStmt->execute([$uid]);
+        $sum = (int) $sumStmt->fetchColumn();
+
+        evaluateBadges($uid);
+        $pdo->commit();
+        $created++;
+        echo "[OK] Created demo user: $name ($hood) with $logCount logs, $sum points.\n";
+    } catch (Throwable $ex) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $ex;
     }
-
-    // Roll up totals onto the user record.
-    $sum = $pdo->query("SELECT COALESCE(SUM(points_awarded),0) FROM recycling_logs WHERE user_id=$uid")->fetchColumn();
-    $pdo->prepare('UPDATE users SET points_balance = ?, total_points = ?, streak_count = ? WHERE id = ?')
-        ->execute([$sum, $sum, random_int(1, 9), $uid]);
-
-    evaluateBadges($uid);
-    $created++;
-    echo "[OK] Created demo user: $name ($hood) with $logCount logs, $sum points.\n";
 }
 
 echo "\nSeeded $created demo residents. Use the configured demo password to sign in,\n";

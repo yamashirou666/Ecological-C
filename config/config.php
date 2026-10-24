@@ -49,9 +49,15 @@ defined('MAIL_SMTP_AUTH') || define('MAIL_SMTP_AUTH', $configValue($secretConfig
 // ---- App settings ----
 const APP_NAME = 'EcoCycle';
 const APP_TAGLINE = 'Turn everyday recycling into a rewarding community habit.';
+const APP_TIMEZONE = 'Asia/Manila';
 const WALLET_MIN_WITHDRAWAL = 500;
 const WALLET_POINTS_PER_PESO = 10;
 const WALLET_DAILY_WITHDRAWAL_CAP = 5000;
+const WALLET_WITHDRAWAL_EXPIRY_MINUTES = 10;
+const PIN_RESET_COOLDOWN_HOURS = 24;
+const WALLET_CHECKOUT_ENABLED = true;
+
+date_default_timezone_set(APP_TIMEZONE);
 
 function hashPassword(string $password): string
 {
@@ -180,6 +186,7 @@ function db(bool $withDatabase = true): PDO
     ];
 
     $connection = new PDO($dsn, DB_USER, DB_PASS, $options);
+    $connection->exec('SET time_zone = ' . $connection->quote(date('P')));
     if ($withDatabase) {
         $pdo = $connection;
     }

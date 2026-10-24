@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/functions.php';
 requireLogin();
 
 $user = currentUser();
+sweepExpiredWithdrawalRequests((int) $user['id']);
 $wallet = getUserWallet((int) $user['id']);
 $hasPin = hasPin((int) $user['id']);
 $isLocked = isWalletLocked((int) $user['id']);
@@ -18,6 +19,7 @@ $success = [];
 $showWithdrawalForm = false;
 $showPinSetup = false;
 $savedPayoutMethods = getSavedPayoutMethods((int) $user['id']);
+$legacyWithdrawalToken = WALLET_CHECKOUT_ENABLED ? '' : getWithdrawalIdempotencyToken('legacy');
 $dailyWithdrawalTotal = getDailyWithdrawalTotal((int) $user['id']);
 $withdrawalRemainingQuota = max(0, WALLET_DAILY_WITHDRAWAL_CAP - $dailyWithdrawalTotal);
 
@@ -47,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $errors[] = 'Failed to set PIN: ' . $ex->getMessage();
                 }
             }
-        } elseif ($action === 'withdraw') {
+        } elseif ($action === 'withdraw' && !WALLET_CHECKOUT_ENABLED) {
             if (!$hasPin) {
                 $showPinSetup = true;
                 $errors[] = 'Please set up a PIN first.';
@@ -62,6 +64,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ];
                 $savedMethodId = (int) ($_POST['saved_method_id'] ?? 0);
                 $saveMethod = !empty($_POST['save_payout_method']);
+                if (!isWithdrawalIdempotencyTokenValid('legacy', (string) ($_POST['idempotency_token'] ?? ''))) {
+                    $errors[] = 'This withdrawal form has already been submitted or expired. Refresh and try again.';
+                }
 
                 if ($savedMethodId > 0) {
                     $savedStmt = db()->prepare('SELECT method, provider, account_label, account_last4 FROM saved_payout_methods WHERE id = ? AND user_id = ?');
@@ -102,6 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             default => 'Voucher / Gift Card Withdrawal'
                         };
                         $txn = createWithdrawal((int) $user['id'], $amount, $method, $desc, $details, $saveMethod);
+                        unset($_SESSION['wallet_withdrawal_idempotency']);
                         logWithdrawalAudit((int) $user['id'], 'withdrawal_completed', $amount, $method, (int) $txn['id'], ['provider' => $details['provider'], 'account_last4' => substr($details['account'], -4)]);
                         sendWalletNotification((int) $user['id'], 'withdrawal', [
                             'amount' => $amount,
@@ -123,6 +129,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
     }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && WALLET_CHECKOUT_ENABLED
+    && ($_POST['action'] ?? '') === 'withdraw' && !$errors) {
+    $errors[] = 'Use the checkout page to start a withdrawal.';
 }
 
 // Transaction filtering
@@ -205,9 +216,26 @@ require __DIR__ . '/includes/header.php';
             <button onclick="document.getElementById('pinSetupModal').showModal()" class="wallet-action bg-white text-emerald-700 hover:bg-emerald-50 <?= e($hasPin ? 'opacity-50 cursor-not-allowed' : '') ?>" <?= e($hasPin ? 'disabled' : '') ?>>
                 <?= e($hasPin ? '✓ PIN Set' : '🔐 Set PIN') ?>
             </button>
-            <button onclick="document.getElementById('withdrawalModal').showModal()" class="wallet-action bg-emerald-500 hover:bg-emerald-400 text-white" <?= !$hasPin || $isLocked ? 'disabled' : '' ?>>
-                💰 Withdraw Points
-            </button>
+            <?php if (WALLET_CHECKOUT_ENABLED): ?>
+                <?php if ($hasPin && !$isLocked): ?>
+                    <a href="withdrawal_checkout.php?step=start" class="wallet-action bg-emerald-500 hover:bg-emerald-400 text-white inline-block">💰 Withdraw Points</a>
+                <?php else: ?>
+                    <span class="wallet-action bg-emerald-500 text-white opacity-60 cursor-not-allowed" aria-disabled="true" title="<?= e($isLocked ? 'Wallet temporarily locked' : 'Set up a PIN to withdraw') ?>">💰 Withdraw Points</span>
+                <?php endif; ?>
+            <?php else: ?>
+                <?php if ($hasPin && !$isLocked && (int) $wallet['balance'] >= WALLET_MIN_WITHDRAWAL): ?>
+                    <button onclick="document.getElementById('withdrawalModal').showModal()" class="wallet-action bg-emerald-500 hover:bg-emerald-400 text-white">
+                        💰 Withdraw Points
+                    </button>
+                <?php else: ?>
+                    <?php
+                    $withdrawDisabledReason = (int) $wallet['balance'] < WALLET_MIN_WITHDRAWAL
+                        ? 'You need at least ' . num(WALLET_MIN_WITHDRAWAL) . ' points to withdraw'
+                        : ($isLocked ? 'Wallet temporarily locked' : 'Set up a PIN to withdraw');
+                    ?>
+                    <span class="wallet-action bg-emerald-500 text-white opacity-60 cursor-not-allowed" aria-disabled="true" title="<?= e($withdrawDisabledReason) ?>">💰 Withdraw Points</span>
+                <?php endif; ?>
+            <?php endif; ?>
             <a href="rewards.php" class="wallet-action bg-emerald-400 hover:bg-emerald-300 text-emerald-900 inline-block">
                 🎁 Redeem Rewards
             </a>
@@ -237,18 +265,20 @@ require __DIR__ . '/includes/header.php';
                 <button type="submit" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg transition">
                     Set PIN
                 </button>
-                <button type="button" onclick="document.getElementById('pinSetupModal').close()" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 rounded-lg transition">
+                <button type="button" onclick="document.getElementById('pinSetupModal').close()" class="wallet-secondary-button flex-1 font-bold py-3 rounded-lg transition">
                     Cancel
                 </button>
             </div>
         </form>
     </dialog>
 
-    <!-- Withdrawal Modal -->
+    <?php if (!WALLET_CHECKOUT_ENABLED): ?>
+    <!-- Legacy withdrawal modal, retained for the checkout feature flag. -->
     <dialog id="withdrawalModal" class="rounded-2xl shadow-2xl backdrop:bg-black/50 p-0 max-w-lg w-[calc(100%-2rem)]">
         <form method="post" class="p-8">
             <?= csrfField() ?>
             <input type="hidden" name="action" value="withdraw">
+            <input type="hidden" name="idempotency_token" value="<?= e($legacyWithdrawalToken) ?>">
             <input type="hidden" name="confirmed_withdrawal" id="confirmed_withdrawal" value="0">
             
             <h2 class="text-2xl font-bold text-slate-900 mb-2">💰 Withdraw Points</h2>
@@ -308,14 +338,14 @@ require __DIR__ . '/includes/header.php';
             <div class="mb-6">
                 <label for="pin_attempt" class="block text-sm font-semibold text-slate-700 mb-2">Confirm with PIN</label>
                 <input type="password" id="pin_attempt" name="pin_attempt" maxlength="6" inputmode="numeric" pattern="\d{4,6}" placeholder="••••" class="w-full px-4 py-3 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500 text-center text-2xl tracking-widest" required>
-                <p class="text-xs text-slate-600 mt-2">Enter your 4-6 digit PIN to confirm withdrawal. <a href="profile.php" class="text-emerald-600 font-semibold">Forgot PIN?</a></p>
+                <p class="text-xs text-slate-600 mt-2">Enter your 4-6 digit PIN to confirm withdrawal. <a href="pin_reset.php" class="text-emerald-600 font-semibold">Forgot PIN?</a></p>
             </div>
 
             <div class="flex gap-3">
                 <button type="button" id="reviewWithdrawal" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg transition">
                     Review withdrawal
                 </button>
-                <button type="button" onclick="document.getElementById('withdrawalModal').close()" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 rounded-lg transition">
+                <button type="button" onclick="document.getElementById('withdrawalModal').close()" class="wallet-secondary-button flex-1 font-bold py-3 rounded-lg transition">
                     Cancel
                 </button>
             </div>
@@ -328,17 +358,18 @@ require __DIR__ . '/includes/header.php';
             <p id="withdrawalSummary" class="text-slate-600 text-sm mb-6"></p>
             <div class="flex gap-3">
                 <button type="button" id="confirmWithdrawal" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-lg">Confirm and enter PIN</button>
-                <button type="button" onclick="document.getElementById('withdrawalConfirmModal').close()" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold py-3 rounded-lg">Edit</button>
+                <button type="button" onclick="document.getElementById('withdrawalConfirmModal').close()" class="wallet-secondary-button flex-1 font-bold py-3 rounded-lg">Edit</button>
             </div>
         </div>
     </dialog>
+    <?php endif; ?>
 
     <!-- Transaction History Section -->
     <div class="bg-white rounded-2xl shadow-sm border border-eco-100 p-6">
         <div class="flex items-center justify-between mb-6">
             <h2 class="text-2xl font-bold text-slate-900">📊 Transaction History</h2>
-            <a href="receipt.php?action=export_csv" class="text-sm bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold px-4 py-2 rounded-lg transition">
-                📥 Export as CSV
+            <a href="receipt.php?action=export_csv" class="wallet-secondary-button text-sm font-bold px-4 py-2 rounded-lg transition" aria-label="Export transactions as CSV">
+                Export CSV
             </a>
         </div>
 
@@ -355,6 +386,7 @@ require __DIR__ . '/includes/header.php';
                     <option value="deposit" <?= e($filterType === 'deposit' ? 'selected' : '') ?>>Deposits</option>
                     <option value="withdrawal" <?= e($filterType === 'withdrawal' ? 'selected' : '') ?>>Withdrawals</option>
                     <option value="redemption" <?= e($filterType === 'redemption' ? 'selected' : '') ?>>Redemptions</option>
+                    <option value="adjustment" <?= e($filterType === 'adjustment' ? 'selected' : '') ?>>Adjustments</option>
                 </select>
             </div>
             <form id="filterForm" method="get" class="hidden">
@@ -371,21 +403,18 @@ require __DIR__ . '/includes/header.php';
                         'deposit' => '⬇️',
                         'withdrawal' => '⬆️',
                         'redemption' => '🎁',
+                        'adjustment' => '⚖️',
                         default => '•'
                     };
-                    $typeLabel = match($txn['type']) {
-                        'deposit' => 'Deposit',
-                        'withdrawal' => 'Withdrawal',
-                        'redemption' => 'Redemption',
-                        default => 'Transaction'
-                    };
+                    $typeLabel = walletTransactionLabel((string) $txn['type']);
+                    $balanceChange = walletTransactionBalanceChange($txn);
                     $statusColor = match($txn['status']) {
                         'completed' => 'bg-green-50 text-green-700 border-green-200',
                         'pending' => 'bg-yellow-50 text-yellow-700 border-yellow-200',
                         'failed' => 'bg-red-50 text-red-700 border-red-200',
                         default => 'bg-slate-50 text-slate-700 border-slate-200'
                     };
-                    $signClass = $txn['type'] === 'deposit' ? 'text-green-600' : 'text-emerald-600';
+                    $signClass = $balanceChange >= 0 ? 'text-green-600' : 'text-emerald-600';
                 ?>
                     <div class="flex items-center justify-between p-4 border border-slate-200 rounded-lg hover:bg-eco-50 transition">
                         <div class="flex-1">
@@ -393,13 +422,14 @@ require __DIR__ . '/includes/header.php';
                                 <span class="text-2xl"><?= e($icon) ?></span>
                                 <div>
                                     <p class="font-semibold text-slate-900"><?= e($txn['source_description']) ?></p>
+                                    <p class="text-xs text-slate-600"><?= e($typeLabel) ?></p>
                                     <p class="text-xs text-slate-600"><?= date('M d, Y · H:i', strtotime($txn['created_at'])) ?></p>
                                 </div>
                             </div>
                         </div>
                         <div class="text-right">
                             <p class="text-lg font-bold <?= e($signClass) ?>">
-                                <?= e(($txn['type'] === 'deposit' ? '+' : '−') . num($txn['amount'])) ?> pts
+                                <?= e(($balanceChange >= 0 ? '+' : '−') . num(abs($balanceChange))) ?> pts
                             </p>
                             <div class="mt-2 flex items-center gap-2">
                                 <span class="inline-block text-xs font-semibold px-2 py-1 rounded border <?= e($statusColor) ?>">
@@ -440,6 +470,7 @@ require __DIR__ . '/includes/header.php';
     </div>
 </main>
 
+<?php if (!WALLET_CHECKOUT_ENABLED): ?>
 <script>
 document.addEventListener('DOMContentLoaded', function () {
     const form = document.querySelector('#withdrawalModal form');
@@ -484,7 +515,7 @@ document.addEventListener('DOMContentLoaded', function () {
     function updateAmount() {
         const value = Number(amount.value || 0);
         let error = '';
-        if (!Number.isInteger(value) || value < minAmount) error = 'Minimum withdrawal is ' + minAmount.toLocaleString() + ' pts.';
+        if (amount.value !== '' && (!Number.isInteger(value) || value < minAmount)) error = 'Minimum withdrawal is ' + minAmount.toLocaleString() + ' pts.';
         else if (value > balance) error = 'Amount exceeds your current balance.';
         else if (value > dailyQuota) error = 'Amount exceeds your remaining daily quota.';
         amountError.textContent = error;
@@ -529,5 +560,6 @@ document.addEventListener('DOMContentLoaded', function () {
     updateMethod(); updateAmount();
 });
 </script>
+<?php endif; ?>
 
 <?php require __DIR__ . '/includes/footer.php'; ?>

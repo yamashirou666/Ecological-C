@@ -12,7 +12,8 @@
 - ✅ **Banking-style dashboard** with balance, lifetime earned/redeemed, transaction history
 - ✅ **PIN-gated redemptions** for marketplace rewards
 - ✅ **Withdrawal flow** (vouchers, e-wallet, bank transfer)
-- ✅ **Digital receipts** and transaction export (CSV)
+- ✅ **Three-stage simulated withdrawal checkout** with points reservation, review, and QR authorization
+- ✅ **Digital receipts** and transaction export (CSV), including redemption and adjustment ledger entries
 - ✅ **Email notifications** for all wallet events
 - ✅ **Failed attempt lockout** (3 attempts → 15-min lockout)
 - ✅ **Mobile-friendly UI** with numeric keypad for PIN entry
@@ -40,13 +41,13 @@ Stores user wallet account data and PIN security info.
 | created_at | DATETIME | Wallet creation timestamp |
 
 ### 2. **transactions**
-Ledger of all wallet activity (deposits, withdrawals, redemptions).
+Ledger of all wallet activity (deposits, withdrawals, redemptions, adjustments).
 
 | Column | Type | Description |
 |--------|------|-------------|
 | id | INT (PK) | Transaction ID |
 | wallet_id | INT (FK) | Links to wallets table |
-| type | ENUM | 'deposit', 'withdrawal', 'redemption' |
+| type | ENUM | 'deposit', 'withdrawal', 'redemption', 'adjustment' |
 | amount | INT | Points involved |
 | source_description | VARCHAR(255) | "Verified plastic recycling", "Coffee voucher", etc. |
 | status | ENUM | 'pending', 'completed', 'failed', 'cancelled' |
@@ -98,6 +99,10 @@ depositPointsToWallet(int $userId, int $points, string $source): array
 // Auto-deposits points (triggered on verified recycling log).
 // Returns: transaction array with receipt data
 
+adjustPoints(int $userId, int $balanceChange, string $type, string $source, array $receiptDetails = [], string $lifetimeMetric = 'none'): array
+// Atomically updates users.points_balance and wallets.balance and writes a ledger entry.
+// Joins an existing transaction and creates a missing wallet when needed.
+
 createWithdrawal(int $userId, int $points, string $payoutMethod, string $description): array
 // Creates a withdrawal/cash-out transaction.
 // Returns: transaction array
@@ -133,7 +138,7 @@ getWalletLockoutRemaining(int $userId): int
 ```php
 getWalletTransactions(int $userId, ?string $type = null, ?string $search = null, int $limit = 50, int $offset = 0): array
 // Fetches wallet transaction history with optional filtering.
-// $type: 'deposit', 'withdrawal', or 'redemption'
+// $type: 'deposit', 'withdrawal', 'redemption', or 'adjustment'
 // Returns: array of transaction rows
 
 generateReceipt(array $transaction, int $userId): string
@@ -157,6 +162,43 @@ notifyWalletEvent(string $type, array $data): void
 
 ---
 
+## Simulated Withdrawal Checkout
+
+The wallet's `WALLET_CHECKOUT_ENABLED` setting in `config/config.php` selects the checkout flow by default. Set it to `false` to restore the retained legacy withdrawal modal.
+
+For an existing database, run the additive migration from the project directory:
+
+```bash
+php migrate_withdrawal_requests.php
+php migrate_wallet_pin_reset.php
+php migrate_wallet_adjustment_type.php
+```
+
+The adjustment migration adds `adjustment` to the transaction type enum while checking that `deposit`, `withdrawal`, and `redemption` remain supported. It does not modify existing ledger rows.
+
+The checkout collects payout information, reviews the withdrawal and PIN, then opens a separate payout authorization page for e-wallet and bank requests. That page displays a locally generated, single-use QR code, polls status every three seconds, and completes the simulated ledger transaction after authorization. The demo-mode “Simulate scan” button uses the same server-side single-use authorization path. Opening a QR link only shows a confirmation page; the user must submit the CSRF-protected authorization form before the request changes state. Voucher requests complete after PIN confirmation and display a simulated voucher code.
+
+The authorization token and checkout idempotency token are stored as hashes in `withdrawal_requests`; the request also records its status, expiry, reservation, fee, net amount, and eventual ledger transaction. Checkout forms use session-bound one-time idempotency tokens backed by a unique database index to reject duplicate submissions. Requests expire after `WALLET_WITHDRAWAL_EXPIRY_MINUTES` (10 minutes). PHP and each MySQL connection use the `Asia/Manila` time zone so `DATETIME` expiry values are interpreted consistently. The authorization countdown is calculated from MySQL's remaining seconds and refreshed while polling; durations over an hour use `H:MM:SS`. The wallet's Withdraw Points link opens `withdrawal_checkout.php?step=start`; an active request stays resumable from Step 1, and terminal requests are removed from the checkout session. The wallet, checkout, and authorization routes lazily sweep overdue requests and release their reserved points exactly once. The authorization and idempotency fields are added by the idempotent `migrate_withdrawal_requests.php` migration. No payout method transfers real money.
+
+Wallet PIN resets are available at `pin_reset.php` after the signed-in user verifies their account password. Password attempts use the shared `login_attempts` rate limiter. A successful self-service or administrator reset clears PIN lockout state, cancels open withdrawals and returns reservations atomically, and records an audit entry without storing the PIN. `PIN_RESET_COOLDOWN_HOURS` defaults to 24; set it to 0 to disable the hold while testing. The reset timestamp is stored in `wallets.pin_reset_at`; existing databases must run `php migrate_wallet_pin_reset.php`. When email features are enabled, the account receives a PIN-change notice through the configured mail adapter.
+
+To force-expire a stuck pending or authorized request without bypassing point release, first identify its ID and then set its deadline to the current database time:
+
+```sql
+SET time_zone = '+08:00';
+
+UPDATE withdrawal_requests
+   SET expires_at = CURRENT_TIMESTAMP
+ WHERE id = <request_id>
+   AND status IN ('pending', 'authorized');
+```
+
+Replace `<request_id>` with the affected request's ID. Then sign in as that account and open `wallet.php` or the withdrawal checkout. Its normal expiry sweep marks the request expired and returns `points_reserved` to the wallet and user balance exactly once. Do not set `status = 'expired'` directly; doing so bypasses the reservation-release logic.
+
+Pending and authorized reservations reduce the available wallet balance and count toward the `WALLET_DAILY_WITHDRAWAL_CAP` daily limit. The daily usage query starts at MySQL `CURDATE()`; each application connection sets its MySQL session timezone from `APP_TIMEZONE`, so the quota resets at midnight Asia/Manila time. Step 1 displays daily usage and explains when the balance or remaining quota is below the minimum withdrawal. The checkout displays a fee row of PHP 0.00 and applies the existing rate of 10 points per peso.
+
+The QR image is generated locally using the `qrcode` npm package and bundled for the browser with Browserify. Install the project dependencies with `npm install`; rebuild the checked-in browser bundle with `npm run build:withdrawal-qr`.
+
 ## User Interface
 
 ### 1. **wallet.php** — Main Dashboard
@@ -174,7 +216,7 @@ notifyWalletEvent(string $type, array $data): void
 1. User logs in, navigates to "EcoWallet" link in header
 2. Sees current balance, lifetime stats
 3. If no PIN set, "Set PIN" button is highlighted
-4. Can click "Withdraw Points" to enter amount, choose payout method, verify PIN
+4. Can click "Withdraw Points" to choose an amount and payout method, then review details and verify the wallet PIN
 5. Can view transaction history with detailed descriptions
 6. Can click "📄 Receipt" on any transaction to view/download
 
@@ -370,6 +412,10 @@ if ($attempts >= 3) { // Change 3 to desired threshold
 - [ ] 3 wrong PINs → wallet locked, "try again in X seconds"
 - [ ] Wait 15 minutes → can attempt again
 - [ ] Correct PIN → redemption completes
+- [ ] Redemption → both balances decrease once, lifetime redeemed increases, and a Redemption ledger entry and receipt appear
+- [ ] Positive and negative adjustment entries → signed amounts and Adjustment receipts display correctly
+- [ ] Recycling/deposit for a user without a wallet → wallet is created and balances plus deposit ledger entry match
+- [ ] Run `seed_demo.php` → every generated demo recycling log has a matching wallet deposit entry
 - [ ] Withdraw points → PIN modal, success message
 - [ ] View receipt → HTML page with transaction details
 - [ ] Download receipt → HTML file downloaded

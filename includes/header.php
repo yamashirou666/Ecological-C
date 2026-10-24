@@ -147,7 +147,18 @@ function navLink(string $href, string $label, string $active): string
                         'X-Requested-With': 'XMLHttpRequest'
                     },
                     body: 'theme_only=1&theme_preference=' + encodeURIComponent(next) + '&csrf=' + encodeURIComponent(window.ECO_THEME_CSRF)
-                }).catch(function() {});
+                }).then(function(response) {
+                    if (!response.ok) {
+                        throw new Error('The server rejected the theme preference update.');
+                    }
+                    return response.json();
+                }).then(function(result) {
+                    if (!result.ok) {
+                        throw new Error('The server did not save the theme preference.');
+                    }
+                }).catch(function(error) {
+                    console.error('Theme preference could not be saved to the account.', error);
+                });
             }
         };
 

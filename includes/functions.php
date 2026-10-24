@@ -50,56 +50,44 @@ function sanitizeThemePreference(string $theme): string
 
 function ensureUserThemePreferenceColumn(): void
 {
-    try {
-        $stmt = db()->query("SHOW COLUMNS FROM users LIKE 'theme_preference'");
-        if ($stmt && $stmt->rowCount() === 0) {
-            db()->exec("ALTER TABLE users ADD COLUMN theme_preference VARCHAR(20) NOT NULL DEFAULT 'system' AFTER neighborhood");
-        }
-    } catch (Throwable $e) {
-        // Ignore on older databases; theme preference will fall back to system.
+    $stmt = db()->query("SHOW COLUMNS FROM users LIKE 'theme_preference'");
+    if ($stmt && $stmt->rowCount() === 0) {
+        db()->exec("ALTER TABLE users ADD COLUMN theme_preference VARCHAR(20) NOT NULL DEFAULT 'system' AFTER neighborhood");
     }
 }
 
 function ensureSignupProfileColumns(): void
 {
-    try {
-        $columns = db()->query('SHOW COLUMNS FROM users')->fetchAll(PDO::FETCH_COLUMN);
-        $additions = [
-            ['auth_provider', "VARCHAR(20) NOT NULL DEFAULT 'email' AFTER neighborhood"],
-            ['email_verified_at', 'DATETIME NULL AFTER auth_provider'],
-            ['avatar_id', 'VARCHAR(40) NULL AFTER email_verified_at'],
-            ['interests', 'VARCHAR(255) NULL AFTER avatar_id'],
-            ['referral_code_used', 'VARCHAR(50) NULL AFTER interests'],
-            ['referred_by_user_id', 'INT NULL AFTER referral_code_used'],
-            ['newsletter_opt_in', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER referred_by_user_id'],
-        ];
+    $columns = db()->query('SHOW COLUMNS FROM users')->fetchAll(PDO::FETCH_COLUMN);
+    $additions = [
+        ['auth_provider', "VARCHAR(20) NOT NULL DEFAULT 'email' AFTER neighborhood"],
+        ['email_verified_at', 'DATETIME NULL AFTER auth_provider'],
+        ['avatar_id', 'VARCHAR(40) NULL AFTER email_verified_at'],
+        ['interests', 'VARCHAR(255) NULL AFTER avatar_id'],
+        ['referral_code_used', 'VARCHAR(50) NULL AFTER interests'],
+        ['referred_by_user_id', 'INT NULL AFTER referral_code_used'],
+        ['newsletter_opt_in', 'TINYINT(1) NOT NULL DEFAULT 0 AFTER referred_by_user_id'],
+    ];
 
-        foreach ($additions as [$name, $definition]) {
-            if (!in_array($name, $columns, true)) {
-                db()->exec('ALTER TABLE users ADD COLUMN ' . $name . ' ' . $definition);
-            }
+    foreach ($additions as [$name, $definition]) {
+        if (!in_array($name, $columns, true)) {
+            db()->exec('ALTER TABLE users ADD COLUMN ' . $name . ' ' . $definition);
         }
-    } catch (Throwable $e) {
-        // Ignore for older databases or partial migrations.
     }
 }
 
 function ensureNeighborhoodReference(): void
 {
-    try {
-        db()->exec(
-            'CREATE TABLE IF NOT EXISTS neighborhoods (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                name VARCHAR(120) NOT NULL UNIQUE,
-                is_active TINYINT(1) NOT NULL DEFAULT 1
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
-        );
-        $insert = db()->prepare('INSERT IGNORE INTO neighborhoods (name) VALUES (?)');
-        foreach (['Greendale', 'Maple Ridge', 'Cedar Heights', 'Oakview', 'South Park', 'Riverbend', 'Northfield', 'Lakeside'] as $name) {
-            $insert->execute([$name]);
-        }
-    } catch (Throwable $e) {
-        // Keep signup available if an older database user cannot alter schema.
+    db()->exec(
+        'CREATE TABLE IF NOT EXISTS neighborhoods (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            name VARCHAR(120) NOT NULL UNIQUE,
+            is_active TINYINT(1) NOT NULL DEFAULT 1
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
+    );
+    $insert = db()->prepare('INSERT IGNORE INTO neighborhoods (name) VALUES (?)');
+    foreach (['Greendale', 'Maple Ridge', 'Cedar Heights', 'Oakview', 'South Park', 'Riverbend', 'Northfield', 'Lakeside'] as $name) {
+        $insert->execute([$name]);
     }
 }
 
@@ -109,26 +97,22 @@ ensureNeighborhoodReference();
 
 function ensureWithdrawalTables(): void
 {
-    try {
-        db()->exec('CREATE TABLE IF NOT EXISTS saved_payout_methods (
-            id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL,
-            method ENUM("bank_transfer","ewallet") NOT NULL,
-            provider VARCHAR(40) NOT NULL, account_label VARCHAR(100) NOT NULL,
-            account_last4 VARCHAR(4) NOT NULL, account_hash VARCHAR(255) NOT NULL,
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            INDEX idx_saved_payout_user (user_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
-        db()->exec('CREATE TABLE IF NOT EXISTS withdrawal_audit_log (
-            id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL,
-            transaction_id INT NULL, action VARCHAR(40) NOT NULL, amount INT NULL,
-            payout_method VARCHAR(40) NULL, ip_address VARCHAR(45) NULL,
-            user_agent VARCHAR(255) NULL, details JSON NULL,
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            INDEX idx_withdrawal_audit_user_date (user_id, created_at)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
-    } catch (Throwable $e) {
-        // Existing installations can continue using the core wallet tables.
-    }
+    db()->exec('CREATE TABLE IF NOT EXISTS saved_payout_methods (
+        id INT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL,
+        method ENUM("bank_transfer","ewallet") NOT NULL,
+        provider VARCHAR(40) NOT NULL, account_label VARCHAR(100) NOT NULL,
+        account_last4 VARCHAR(4) NOT NULL, account_hash VARCHAR(255) NOT NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_saved_payout_user (user_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
+    db()->exec('CREATE TABLE IF NOT EXISTS withdrawal_audit_log (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY, user_id INT NOT NULL,
+        transaction_id INT NULL, action VARCHAR(40) NOT NULL, amount INT NULL,
+        payout_method VARCHAR(40) NULL, ip_address VARCHAR(45) NULL,
+        user_agent VARCHAR(255) NULL, details JSON NULL,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_withdrawal_audit_user_date (user_id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
 }
 
 ensureWithdrawalTables();
@@ -610,7 +594,12 @@ function recordRecyclingLog(int $userId, string $material, int $quantity, float 
         $logId = (int) $pdo->lastInsertId();
 
         // Streak: increment if last log was yesterday, reset to 1 if older, keep if today.
-        $user = $pdo->query('SELECT streak_count, last_log_date FROM users WHERE id = ' . $userId)->fetch();
+        $userStmt = $pdo->prepare('SELECT streak_count, last_log_date FROM users WHERE id = ? FOR UPDATE');
+        $userStmt->execute([$userId]);
+        $user = $userStmt->fetch();
+        if (!$user) {
+            throw new RuntimeException('User not found.');
+        }
         $today = new DateTimeImmutable('today');
         $streak = 1;
         if (!empty($user['last_log_date'])) {
@@ -625,56 +614,23 @@ function recordRecyclingLog(int $userId, string $material, int $quantity, float 
             }
         }
 
-        $upd = $pdo->prepare(
-            'UPDATE users
-                SET points_balance = points_balance + ?,
-                    total_points   = total_points + ?,
-                    streak_count   = ?,
-                    last_log_date  = CURDATE()
-              WHERE id = ?'
+        $streakUpdate = $pdo->prepare(
+            'UPDATE users SET streak_count = ?, last_log_date = CURDATE() WHERE id = ?'
         );
-        $upd->execute([$points, $points, $streak, $userId]);
+        $streakUpdate->execute([$streak, $userId]);
 
-        // Auto-deposit points to EcoWallet
-        $wallet = getUserWallet($userId);
-        if ($wallet) {
-            $newBalance = $wallet['balance'] + $points;
-            $newEarned = $wallet['lifetime_earned'] + $points;
-            
-            $walletUpd = $pdo->prepare(
-                'UPDATE wallets
-                 SET balance = ?, lifetime_earned = ?
-                 WHERE id = ?'
-            );
-            $walletUpd->execute([$newBalance, $newEarned, $wallet['id']]);
-
-            // Create wallet transaction record
-            $refId = 'DEP-' . strtoupper(bin2hex(random_bytes(6)));
-            $material_label = $catalogue[$material]['label'];
-            $txnStmt = $pdo->prepare(
-                'INSERT INTO transactions (wallet_id, type, amount, source_description, status, reference_id, balance_after, receipt_data)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-            );
-            
-            $receipt = json_encode([
-                'type' => 'deposit',
-                'amount' => $points,
-                'source' => "Verified $material_label recycling ({$quantity} items, {$weightKg} kg)",
+        $materialLabel = $catalogue[$material]['label'];
+        adjustPoints(
+            $userId,
+            $points,
+            'deposit',
+            "Verified $materialLabel recycling drop-off",
+            [
+                'source' => "Verified $materialLabel recycling ({$quantity} items, {$weightKg} kg)",
                 'log_id' => $logId,
-                'timestamp' => date('Y-m-d H:i:s')
-            ]);
-            
-            $txnStmt->execute([
-                $wallet['id'],
-                'deposit',
-                $points,
-                "Verified $material_label recycling drop-off",
-                'completed',
-                $refId,
-                $newBalance,
-                $receipt
-            ]);
-        }
+            ],
+            'earned'
+        );
 
         $pdo->commit();
     } catch (Throwable $ex) {
@@ -768,86 +724,126 @@ function getUserWallet(int $userId): ?array
 }
 
 /**
- * Deposit points into a user's wallet (triggered on verified recycling log).
- * Returns transaction row with receipt data.
+ * Apply a signed points change to both balances and create its ledger entry.
+ * Joins an existing transaction when called from a larger atomic operation.
  */
-function depositPointsToWallet(int $userId, int $points, string $source): array
-{
-    $pdo = db();
-    $wallet = getUserWallet($userId);
-    
-    if (!$wallet) {
-        throw new RuntimeException('User has no wallet. Cannot deposit.');
+function adjustPoints(
+    int $userId,
+    int $balanceChange,
+    string $type,
+    string $source,
+    array $receiptDetails = [],
+    string $lifetimeMetric = 'none'
+): array {
+    if ($balanceChange === 0 && $type !== 'deposit') {
+        throw new InvalidArgumentException('Points adjustment must be non-zero.');
+    }
+    if (!in_array($type, ['deposit', 'redemption', 'adjustment'], true)) {
+        throw new InvalidArgumentException('Unsupported points transaction type.');
+    }
+    if (!in_array($lifetimeMetric, ['none', 'earned', 'redeemed'], true)) {
+        throw new InvalidArgumentException('Unsupported points lifetime metric.');
+    }
+    if (($type === 'deposit' && $balanceChange < 0)
+        || ($type === 'redemption' && $balanceChange > 0)
+        || ($lifetimeMetric === 'earned' && $balanceChange < 0)
+        || ($lifetimeMetric === 'redeemed' && $balanceChange > 0)) {
+        throw new InvalidArgumentException('Points adjustment direction does not match its transaction type.');
     }
 
+    $pdo = db();
     $ownsTransaction = !$pdo->inTransaction();
     if ($ownsTransaction) {
         $pdo->beginTransaction();
     }
-    try {
-        $newBalance = $wallet['balance'] + $points;
-        $newEarned = $wallet['lifetime_earned'] + $points;
-        
-        $stmt = $pdo->prepare(
-            'UPDATE wallets
-             SET balance = ?, lifetime_earned = ?
-             WHERE id = ?'
-        );
-        $stmt->execute([$newBalance, $newEarned, $wallet['id']]);
 
+    try {
+        $userStmt = $pdo->prepare('SELECT id, points_balance FROM users WHERE id = ? FOR UPDATE');
+        $userStmt->execute([$userId]);
+        $user = $userStmt->fetch();
+        if (!$user) {
+            throw new RuntimeException('User not found.');
+        }
+
+        $createWallet = $pdo->prepare(
+            'INSERT INTO wallets (user_id) VALUES (?) ON DUPLICATE KEY UPDATE user_id = user_id'
+        );
+        $createWallet->execute([$userId]);
+
+        $walletStmt = $pdo->prepare('SELECT * FROM wallets WHERE user_id = ? FOR UPDATE');
+        $walletStmt->execute([$userId]);
+        $wallet = $walletStmt->fetch();
+        if (!$wallet) {
+            throw new RuntimeException('Wallet could not be created.');
+        }
+
+        $amount = abs($balanceChange);
+        if ($balanceChange < 0
+            && ((int) $user['points_balance'] < $amount || (int) $wallet['balance'] < $amount)) {
+            throw new RuntimeException('Insufficient points balance.');
+        }
+
+        $earnedChange = $lifetimeMetric === 'earned' ? $amount : 0;
+        $redeemedChange = $lifetimeMetric === 'redeemed' ? $amount : 0;
         $userUpdate = $pdo->prepare(
             'UPDATE users
-             SET points_balance = points_balance + ?,
-                 total_points = total_points + ?
-             WHERE id = ?'
+                SET points_balance = points_balance + ?,
+                    total_points = total_points + ?
+              WHERE id = ?'
         );
-        $userUpdate->execute([$points, $points, $userId]);
+        $userUpdate->execute([$balanceChange, $earnedChange, $userId]);
 
-        // Create transaction record
-        $refId = 'DEP-' . strtoupper(bin2hex(random_bytes(6)));
-        $txnStmt = $pdo->prepare(
-            'INSERT INTO transactions (wallet_id, type, amount, source_description, status, reference_id, balance_after, receipt_data)
+        $walletUpdate = $pdo->prepare(
+            'UPDATE wallets
+                SET balance = balance + ?,
+                    lifetime_earned = lifetime_earned + ?,
+                    lifetime_redeemed = lifetime_redeemed + ?
+              WHERE id = ?'
+        );
+        $walletUpdate->execute([$balanceChange, $earnedChange, $redeemedChange, $wallet['id']]);
+        $newBalance = (int) $wallet['balance'] + $balanceChange;
+
+        $referencePrefix = match ($type) {
+            'deposit' => 'DEP-',
+            'redemption' => 'RED-',
+            'adjustment' => 'ADJ-',
+        };
+        $referenceId = $referencePrefix . strtoupper(bin2hex(random_bytes(6)));
+        $receipt = array_merge($receiptDetails, [
+            'type' => $type,
+            'amount' => $amount,
+            'balance_change' => $balanceChange,
+            'timestamp' => date('Y-m-d H:i:s'),
+        ]);
+        $transactionStmt = $pdo->prepare(
+            'INSERT INTO transactions
+                (wallet_id, type, amount, source_description, status, reference_id, balance_after, receipt_data)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         );
-        
-        $receipt = json_encode([
-            'type' => 'deposit',
-            'amount' => $points,
-            'source' => $source,
-            'timestamp' => date('Y-m-d H:i:s')
-        ]);
-        
-        $txnStmt->execute([
+        $transactionStmt->execute([
             $wallet['id'],
-            'deposit',
-            $points,
+            $type,
+            $amount,
             $source,
             'completed',
-            $refId,
+            $referenceId,
             $newBalance,
-            $receipt
+            json_encode($receipt, JSON_THROW_ON_ERROR),
         ]);
+        $transactionId = (int) $pdo->lastInsertId();
 
-        $txnId = (int) $pdo->lastInsertId();
         if ($ownsTransaction) {
             $pdo->commit();
         }
 
-        sendWalletNotification($userId, 'deposit', [
-            'amount' => $points,
-            'source' => $source,
-            'new_balance' => $newBalance,
-            'reference_id' => $refId
-        ]);
-
         return [
-            'id' => $txnId,
-            'wallet_id' => $wallet['id'],
-            'type' => 'deposit',
-            'amount' => $points,
-            'reference_id' => $refId,
+            'id' => $transactionId,
+            'wallet_id' => (int) $wallet['id'],
+            'type' => $type,
+            'amount' => $amount,
+            'reference_id' => $referenceId,
             'status' => 'completed',
-            'balance_after' => $newBalance
+            'balance_after' => $newBalance,
         ];
     } catch (Throwable $ex) {
         if ($ownsTransaction && $pdo->inTransaction()) {
@@ -857,14 +853,34 @@ function depositPointsToWallet(int $userId, int $points, string $source): array
     }
 }
 
+/**
+ * Deposit points into a user's wallet (triggered on verified recycling log).
+ * Returns transaction row with receipt data.
+ */
+function depositPointsToWallet(int $userId, int $points, string $source): array
+{
+    if ($points <= 0) {
+        throw new InvalidArgumentException('Deposit points must be positive.');
+    }
+    $transaction = adjustPoints(
+        $userId,
+        $points,
+        'deposit',
+        $source,
+        ['source' => $source],
+        'earned'
+    );
+    sendWalletNotification($userId, 'deposit', [
+        'amount' => $points,
+        'source' => $source,
+        'new_balance' => $transaction['balance_after'],
+        'reference_id' => $transaction['reference_id'],
+    ]);
+    return $transaction;
+}
+
 function applyWelcomeBonus(int $userId): array
 {
-    $wallet = getUserWallet($userId) ?: createWallet($userId);
-    $wallet = getUserWallet($userId);
-    if (!$wallet) {
-        throw new RuntimeException('Could not create wallet for welcome bonus.');
-    }
-
     return depositPointsToWallet($userId, 20, 'Welcome bonus');
 }
 
@@ -875,48 +891,80 @@ function applyWelcomeBonus(int $userId): array
 function verifyPin(int $userId, string $pinAttempt): bool
 {
     $pdo = db();
-    $wallet = getUserWallet($userId);
+    $pdo->beginTransaction();
+    try {
+        $walletStmt = $pdo->prepare('SELECT * FROM wallets WHERE user_id = ? FOR UPDATE');
+        $walletStmt->execute([$userId]);
+        $wallet = $walletStmt->fetch();
 
-    if (!$wallet) {
-        throw new RuntimeException('User has no wallet.');
-    }
-
-    // Check if wallet is locked
-    if ($wallet['locked_until'] && strtotime($wallet['locked_until']) > time()) {
-        return false; // Still locked
-    }
-
-    // Reset attempts if lockout expired
-    if ($wallet['locked_until'] && strtotime($wallet['locked_until']) <= time()) {
-        $resetStmt = $pdo->prepare('UPDATE wallets SET failed_pin_attempts = 0, locked_until = NULL WHERE id = ?');
-        $resetStmt->execute([$wallet['id']]);
-        $wallet['failed_pin_attempts'] = 0;
-    }
-
-    // Verify PIN
-    $correct = $wallet['pin_hash'] && password_verify($pinAttempt, $wallet['pin_hash']);
-
-    if (!$correct) {
-        // Increment failed attempts
-        $attempts = $wallet['failed_pin_attempts'] + 1;
-        $lockedUntil = null;
-
-        // Lock after 3 failed attempts (15 minutes)
-        if ($attempts >= 3) {
-            $lockedUntil = date('Y-m-d H:i:s', time() + 900); // 15 min lockout
+        if (!$wallet) {
+            throw new RuntimeException('User has no wallet.');
+        }
+        if ($wallet['locked_until'] && strtotime($wallet['locked_until']) > time()) {
+            $pdo->commit();
+            return false;
+        }
+        if ($wallet['locked_until'] && strtotime($wallet['locked_until']) <= time()) {
+            $wallet['failed_pin_attempts'] = 0;
         }
 
-        $upd = $pdo->prepare('UPDATE wallets SET failed_pin_attempts = ?, locked_until = ? WHERE id = ?');
-        $upd->execute([$attempts, $lockedUntil, $wallet['id']]);
+        $correct = $wallet['pin_hash'] && password_verify($pinAttempt, $wallet['pin_hash']);
+        if (!$correct) {
+            $attempts = (int) $wallet['failed_pin_attempts'] + 1;
+            $lockedUntil = $attempts >= 3 ? date('Y-m-d H:i:s', time() + 900) : null;
+            $upd = $pdo->prepare('UPDATE wallets SET failed_pin_attempts = ?, locked_until = ? WHERE id = ?');
+            $upd->execute([$attempts, $lockedUntil, $wallet['id']]);
+            $pdo->commit();
+            return false;
+        }
 
-        return false;
+        $pdo->prepare('UPDATE wallets SET failed_pin_attempts = 0, locked_until = NULL WHERE id = ?')
+            ->execute([$wallet['id']]);
+        $pdo->commit();
+        return true;
+    } catch (Throwable $ex) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $ex;
     }
+}
 
-    // On success, reset attempts
-    $resetStmt = $pdo->prepare('UPDATE wallets SET failed_pin_attempts = 0, locked_until = NULL WHERE id = ?');
-    $resetStmt->execute([$wallet['id']]);
+function getWithdrawalIdempotencyToken(string $scope): string
+{
+    $sessionKey = match ($scope) {
+        'checkout' => 'withdrawal_checkout_idempotency',
+        'legacy' => 'wallet_withdrawal_idempotency',
+        default => throw new InvalidArgumentException('Invalid withdrawal idempotency scope.'),
+    };
+    if (!isset($_SESSION[$sessionKey]) || !preg_match('/^[a-f0-9]{64}$/', (string) $_SESSION[$sessionKey])) {
+        $_SESSION[$sessionKey] = bin2hex(random_bytes(32));
+    }
+    return (string) $_SESSION[$sessionKey];
+}
 
-    return true;
+function isWithdrawalIdempotencyTokenValid(string $scope, string $candidate): bool
+{
+    $sessionKey = match ($scope) {
+        'checkout' => 'withdrawal_checkout_idempotency',
+        'legacy' => 'wallet_withdrawal_idempotency',
+        default => throw new InvalidArgumentException('Invalid withdrawal idempotency scope.'),
+    };
+    return preg_match('/^[a-f0-9]{64}$/', $candidate) === 1
+        && isset($_SESSION[$sessionKey])
+        && hash_equals((string) $_SESSION[$sessionKey], $candidate);
+}
+
+function deriveWithdrawalAuthorizationToken(int $userId, string $referenceId, string $checkoutToken): string
+{
+    if (!preg_match('/^[a-f0-9]{64}$/', $checkoutToken)) {
+        throw new InvalidArgumentException('Withdrawal checkout token is invalid.');
+    }
+    return hash_hmac(
+        'sha256',
+        'withdrawal-authorization:' . $userId . ':' . $referenceId,
+        $checkoutToken
+    );
 }
 
 /**
@@ -959,6 +1007,168 @@ function setWalletPin(int $userId, string $pin): void
          WHERE user_id = ?'
     );
     $stmt->execute([$hash, $userId]);
+}
+
+function getWalletPinResetCooldownUntil(int $userId): ?string
+{
+    if (PIN_RESET_COOLDOWN_HOURS < 1) {
+        return null;
+    }
+
+    $stmt = db()->prepare(
+        'SELECT CASE
+            WHEN pin_reset_at IS NOT NULL
+             AND TIMESTAMPADD(HOUR, ?, pin_reset_at) > CURRENT_TIMESTAMP
+            THEN TIMESTAMPADD(HOUR, ?, pin_reset_at)
+            ELSE NULL
+         END
+           FROM wallets
+          WHERE user_id = ?'
+    );
+    $stmt->execute([PIN_RESET_COOLDOWN_HOURS, PIN_RESET_COOLDOWN_HOURS, $userId]);
+    $until = $stmt->fetchColumn();
+    return is_string($until) ? $until : null;
+}
+
+function assertWalletWithdrawalCooldownExpired(array $wallet): void
+{
+    if (PIN_RESET_COOLDOWN_HOURS < 1 || empty($wallet['pin_reset_at'])) {
+        return;
+    }
+
+    $stmt = db()->prepare('SELECT TIMESTAMPADD(HOUR, ?, ?) > CURRENT_TIMESTAMP');
+    $stmt->execute([PIN_RESET_COOLDOWN_HOURS, $wallet['pin_reset_at']]);
+    if ((int) $stmt->fetchColumn() === 1) {
+        throw new RuntimeException('Withdrawals are temporarily on hold after a wallet PIN reset.');
+    }
+}
+
+function isTrivialWalletPin(string $pin): bool
+{
+    if (!preg_match('/^[0-9]{4,6}$/D', $pin)) {
+        return true;
+    }
+    if (preg_match('/^([0-9])\1+$/D', $pin)) {
+        return true;
+    }
+
+    $ascending = true;
+    $descending = true;
+    for ($index = 1, $length = strlen($pin); $index < $length; $index++) {
+        $previous = (int) $pin[$index - 1];
+        $current = (int) $pin[$index];
+        $ascending = $ascending && $current === ($previous + 1) % 10;
+        $descending = $descending && $current === ($previous + 9) % 10;
+    }
+    return $ascending || $descending;
+}
+
+/**
+ * Replace or clear a wallet PIN, cancel open requests, and release reservations atomically.
+ */
+function resetWalletPin(int $userId, ?string $newPin, ?int $adminUserId = null): void
+{
+    if ($newPin !== null && !preg_match('/^\d{4,6}$/', $newPin)) {
+        throw new InvalidArgumentException('Invalid wallet PIN reset request.');
+    }
+
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $walletStmt = $pdo->prepare('SELECT * FROM wallets WHERE user_id = ? FOR UPDATE');
+        $walletStmt->execute([$userId]);
+        $wallet = $walletStmt->fetch();
+        if (!$wallet) {
+            throw new RuntimeException('Wallet reset could not be completed.');
+        }
+        if ($newPin !== null && $wallet['pin_hash'] !== null && password_verify($newPin, $wallet['pin_hash'])) {
+            throw new RuntimeException('Wallet reset could not be completed.');
+        }
+
+        $requestsStmt = $pdo->prepare(
+            "SELECT id, points_reserved
+               FROM withdrawal_requests
+              WHERE user_id = ? AND status IN ('pending', 'authorized')
+              ORDER BY id
+              FOR UPDATE"
+        );
+        $requestsStmt->execute([$userId]);
+        $requests = $requestsStmt->fetchAll();
+        $released = 0;
+        $cancelStmt = $pdo->prepare(
+            "UPDATE withdrawal_requests
+                SET status = 'cancelled', points_reserved = 0, cancelled_at = CURRENT_TIMESTAMP
+              WHERE id = ? AND status IN ('pending', 'authorized')"
+        );
+        foreach ($requests as $request) {
+            $cancelStmt->execute([$request['id']]);
+            if ($cancelStmt->rowCount() === 1) {
+                $released += (int) $request['points_reserved'];
+            }
+        }
+
+        $pinHash = $newPin === null ? null : password_hash($newPin, PASSWORD_DEFAULT);
+        if ($newPin !== null && $pinHash === false) {
+            throw new RuntimeException('Wallet reset could not be completed.');
+        }
+        $updateWallet = $pdo->prepare(
+            'UPDATE wallets
+                SET pin_hash = ?, pin_created_at = ?, pin_reset_at = CURRENT_TIMESTAMP,
+                    failed_pin_attempts = 0, locked_until = NULL, balance = balance + ?
+              WHERE id = ?'
+        );
+        $updateWallet->execute([
+            $pinHash,
+            $newPin === null ? null : date('Y-m-d H:i:s'),
+            $released,
+            $wallet['id'],
+        ]);
+        if ($released > 0) {
+            $pdo->prepare('UPDATE users SET points_balance = points_balance + ? WHERE id = ?')
+                ->execute([$released, $userId]);
+        }
+
+        logWithdrawalAudit(
+            $userId,
+            $adminUserId === null ? 'wallet_pin_reset' : 'wallet_pin_reset_admin',
+            null,
+            null,
+            null,
+            array_filter([
+                'admin_user_id' => $adminUserId,
+                'cancelled_requests' => count($requests),
+                'released_points' => $released,
+            ], static fn ($value): bool => $value !== null)
+        );
+        $pdo->commit();
+    } catch (Throwable $ex) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $ex;
+    }
+}
+
+function sendWalletPinChangedNotice(int $userId): void
+{
+    if (!EMAIL_FEATURES_ENABLED) {
+        return;
+    }
+
+    $stmt = db()->prepare('SELECT name, email FROM users WHERE id = ?');
+    $stmt->execute([$userId]);
+    $user = $stmt->fetch();
+    if (!$user) {
+        throw new RuntimeException('Could not load account details for the wallet PIN notice.');
+    }
+    sendAppEmail(
+        (string) $user['email'],
+        'Your EcoWallet PIN was changed',
+        sprintf(
+            "Hi %s,\n\nYour EcoWallet PIN was changed. If you did not make this change, please contact an administrator.\n\n— EcoCycle Team\n",
+            $user['name']
+        )
+    );
 }
 
 /**
@@ -1004,9 +1214,572 @@ function validateWithdrawalDetails(string $method, array $details): array
 
 function getDailyWithdrawalTotal(int $userId): int
 {
-    $stmt = db()->prepare("SELECT COALESCE(SUM(amount), 0) FROM transactions t JOIN wallets w ON w.id = t.wallet_id WHERE w.user_id = ? AND t.type = 'withdrawal' AND t.created_at >= CURDATE() AND t.status IN ('pending','processing','completed')");
-    $stmt->execute([$userId]);
+    $stmt = db()->prepare(
+        "SELECT
+            COALESCE((
+                SELECT SUM(t.amount)
+                  FROM transactions t
+                  JOIN wallets w ON w.id = t.wallet_id
+                 WHERE w.user_id = ?
+                   AND t.type = 'withdrawal'
+                   AND t.created_at >= CURDATE()
+                   AND t.status IN ('pending', 'completed')
+            ), 0)
+            +
+            COALESCE((
+                SELECT SUM(r.points_reserved)
+                  FROM withdrawal_requests r
+                 WHERE r.user_id = ?
+                   AND r.status IN ('pending', 'authorized')
+                   AND r.expires_at > CURRENT_TIMESTAMP
+            ), 0)"
+    );
+    $stmt->execute([$userId, $userId]);
     return (int) $stmt->fetchColumn();
+}
+
+/**
+ * Expire this user's overdue checkout requests and release each reservation once.
+ */
+function sweepExpiredWithdrawalRequests(int $userId): int
+{
+    $candidateStmt = db()->prepare(
+        "SELECT 1 FROM withdrawal_requests
+          WHERE user_id = ?
+            AND status IN ('pending', 'authorized')
+            AND expires_at <= CURRENT_TIMESTAMP
+          LIMIT 1"
+    );
+    $candidateStmt->execute([$userId]);
+    if (!$candidateStmt->fetchColumn()) {
+        return 0;
+    }
+
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $walletStmt = $pdo->prepare('SELECT id FROM wallets WHERE user_id = ? FOR UPDATE');
+        $walletStmt->execute([$userId]);
+        $wallet = $walletStmt->fetch();
+        if (!$wallet) {
+            throw new RuntimeException('User has no wallet.');
+        }
+
+        $requestsStmt = $pdo->prepare(
+            "SELECT id, points_reserved
+               FROM withdrawal_requests
+              WHERE user_id = ?
+                AND status IN ('pending', 'authorized')
+                AND expires_at <= CURRENT_TIMESTAMP
+              ORDER BY id
+              FOR UPDATE"
+        );
+        $requestsStmt->execute([$userId]);
+        $requests = $requestsStmt->fetchAll();
+        $released = 0;
+
+        $expireStmt = $pdo->prepare(
+            "UPDATE withdrawal_requests
+                SET status = 'expired', points_reserved = 0, expired_at = CURRENT_TIMESTAMP
+              WHERE id = ?
+                AND status IN ('pending', 'authorized')
+                AND expires_at <= CURRENT_TIMESTAMP"
+        );
+        foreach ($requests as $request) {
+            $expireStmt->execute([$request['id']]);
+            if ($expireStmt->rowCount() === 1) {
+                $released += (int) $request['points_reserved'];
+            }
+        }
+
+        if ($released > 0) {
+            $pdo->prepare('UPDATE wallets SET balance = balance + ? WHERE id = ?')
+                ->execute([$released, $wallet['id']]);
+            $pdo->prepare('UPDATE users SET points_balance = points_balance + ? WHERE id = ?')
+                ->execute([$released, $userId]);
+        }
+
+        $pdo->commit();
+        return $released;
+    } catch (Throwable $ex) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $ex;
+    }
+}
+
+/**
+ * Place a checkout request and reserve its points until completion or expiry.
+ */
+function createWithdrawalRequest(int $userId, array $requestData): array
+{
+    sweepExpiredWithdrawalRequests($userId);
+
+    $method = (string) ($requestData['method'] ?? '');
+    if (!in_array($method, ['voucher', 'ewallet', 'bank_transfer'], true)) {
+        throw new InvalidArgumentException('Payout method is invalid.');
+    }
+
+    $points = (int) ($requestData['points'] ?? 0);
+    $provider = trim((string) ($requestData['provider'] ?? ''));
+    $accountHolder = trim((string) ($requestData['account_holder'] ?? ''));
+    $account = trim((string) ($requestData['account'] ?? ''));
+    $accountLast4 = (string) ($requestData['account_last4'] ?? substr($account, -4));
+    $label = trim((string) ($requestData['label'] ?? ''));
+    $savedMethodId = (int) ($requestData['saved_method_id'] ?? 0);
+    $saveMethod = !empty($requestData['save_method']);
+    $idempotencyToken = (string) ($requestData['idempotency_token'] ?? '');
+    if (!preg_match('/^[a-f0-9]{64}$/', $idempotencyToken)) {
+        throw new InvalidArgumentException('Withdrawal idempotency token is invalid.');
+    }
+    $idempotencyHash = hash('sha256', $idempotencyToken);
+
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $walletStmt = $pdo->prepare('SELECT * FROM wallets WHERE user_id = ? FOR UPDATE');
+        $walletStmt->execute([$userId]);
+        $wallet = $walletStmt->fetch();
+        if (!$wallet) {
+            throw new RuntimeException('User has no wallet.');
+        }
+        assertWalletWithdrawalCooldownExpired($wallet);
+        $duplicateStmt = $pdo->prepare(
+            'SELECT id FROM withdrawal_requests
+              WHERE user_id = ? AND idempotency_key_hash = ?
+              LIMIT 1'
+        );
+        $duplicateStmt->execute([$userId, $idempotencyHash]);
+        if ($duplicateStmt->fetchColumn()) {
+            throw new RuntimeException('This withdrawal form has already been submitted.');
+        }
+        if ($points < WALLET_MIN_WITHDRAWAL) {
+            throw new RuntimeException('Minimum withdrawal is ' . num(WALLET_MIN_WITHDRAWAL) . ' points.');
+        }
+        if ((int) $wallet['balance'] < $points) {
+            throw new RuntimeException('Amount exceeds your available balance.');
+        }
+        if (getDailyWithdrawalTotal($userId) + $points > WALLET_DAILY_WITHDRAWAL_CAP) {
+            throw new RuntimeException('Amount exceeds your remaining daily withdrawal quota.');
+        }
+
+        $reference = 'WDR-' . strtoupper(bin2hex(random_bytes(6)));
+        $token = bin2hex(random_bytes(32));
+        $tokenHash = hash('sha256', $token);
+        $authorizationToken = deriveWithdrawalAuthorizationToken($userId, $reference, $token);
+        $authorizationTokenHash = hash('sha256', $authorizationToken);
+        $grossAmount = number_format($points / WALLET_POINTS_PER_PESO, 2, '.', '');
+        $fee = '0.00';
+        $netAmount = $grossAmount;
+        $voucherCode = $method === 'voucher'
+            ? 'ECO-' . strtoupper(bin2hex(random_bytes(5)))
+            : null;
+
+        $newBalance = (int) $wallet['balance'] - $points;
+        $pdo->prepare('UPDATE wallets SET balance = ? WHERE id = ?')
+            ->execute([$newBalance, $wallet['id']]);
+        $pdo->prepare('UPDATE users SET points_balance = points_balance - ? WHERE id = ?')
+            ->execute([$points, $userId]);
+
+        $insertStmt = $pdo->prepare(
+            "INSERT INTO withdrawal_requests
+                (user_id, wallet_id, reference_id, token_hash, idempotency_key_hash,
+                 authorization_token_hash, status, points_amount,
+                 points_reserved, gross_amount, fee, net_amount, payout_method, provider,
+                 payout_label, account_holder, account_last4, voucher_code, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                     TIMESTAMPADD(MINUTE, ?, CURRENT_TIMESTAMP))"
+        );
+        $insertStmt->execute([
+            $userId,
+            $wallet['id'],
+            $reference,
+            $tokenHash,
+            $idempotencyHash,
+            $authorizationTokenHash,
+            $points,
+            $points,
+            $grossAmount,
+            $fee,
+            $netAmount,
+            $method,
+            $provider,
+            $label,
+            $accountHolder,
+            $accountLast4,
+            $voucherCode,
+            WALLET_WITHDRAWAL_EXPIRY_MINUTES,
+        ]);
+        $requestId = (int) $pdo->lastInsertId();
+
+        if ($saveMethod && $savedMethodId === 0 && $method !== 'voucher' && $account !== '') {
+            $methodLabel = $label !== '' ? $label : trim($provider . ' · ' . $accountHolder);
+            $pdo->prepare(
+                'INSERT INTO saved_payout_methods
+                    (user_id, method, provider, account_label, account_last4, account_hash)
+                 VALUES (?, ?, ?, ?, ?, ?)'
+            )->execute([
+                $userId,
+                $method,
+                $provider,
+                substr($methodLabel, 0, 100),
+                substr($account, -4),
+                password_hash($account, PASSWORD_DEFAULT),
+            ]);
+        }
+
+        $pdo->commit();
+        return [
+            'id' => $requestId,
+            'reference_id' => $reference,
+            'token' => $token,
+            'status' => 'pending',
+            'points_amount' => $points,
+            'points_reserved' => $points,
+            'gross_amount' => $grossAmount,
+            'fee' => $fee,
+            'net_amount' => $netAmount,
+            'payout_method' => $method,
+            'provider' => $provider,
+            'payout_label' => $label,
+            'account_holder' => $accountHolder,
+            'account_last4' => $accountLast4,
+            'voucher_code' => $voucherCode,
+        ];
+    } catch (Throwable $ex) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $ex;
+    }
+}
+
+function markWithdrawalPinVerified(int $userId, int $requestId, string $token): void
+{
+    $stmt = db()->prepare(
+        "UPDATE withdrawal_requests
+            SET pin_verified_at = CURRENT_TIMESTAMP
+          WHERE id = ? AND user_id = ? AND token_hash = ?
+            AND status = 'pending' AND expires_at > CURRENT_TIMESTAMP"
+    );
+    $stmt->execute([$requestId, $userId, hash('sha256', $token)]);
+    if ($stmt->rowCount() === 1) {
+        return;
+    }
+
+    $verifiedStmt = db()->prepare(
+        "SELECT 1 FROM withdrawal_requests
+          WHERE id = ? AND user_id = ? AND token_hash = ?
+            AND status = 'pending' AND pin_verified_at IS NOT NULL
+            AND expires_at > CURRENT_TIMESTAMP"
+    );
+    $verifiedStmt->execute([$requestId, $userId, hash('sha256', $token)]);
+    if (!$verifiedStmt->fetchColumn()) {
+        throw new RuntimeException('This withdrawal request has expired or is no longer pending.');
+    }
+}
+
+function getWithdrawalRequest(int $userId, int $requestId, string $token): ?array
+{
+    $stmt = db()->prepare(
+        'SELECT *,
+                GREATEST(0, TIMESTAMPDIFF(SECOND, CURRENT_TIMESTAMP, expires_at)) AS seconds_remaining
+           FROM withdrawal_requests
+          WHERE id = ? AND user_id = ?'
+    );
+    $stmt->execute([$requestId, $userId]);
+    $request = $stmt->fetch();
+    if (!$request || !hash_equals((string) $request['token_hash'], hash('sha256', $token))) {
+        return null;
+    }
+    return $request;
+}
+
+/**
+ * Consume the QR authorization token once after PIN verification.
+ */
+function consumeWithdrawalAuthorizationToken(int $userId, int $requestId, string $authorizationToken): array
+{
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $walletStmt = $pdo->prepare('SELECT id FROM wallets WHERE user_id = ? FOR UPDATE');
+        $walletStmt->execute([$userId]);
+        if (!$walletStmt->fetch()) {
+            throw new RuntimeException('User has no wallet.');
+        }
+
+        $requestStmt = $pdo->prepare('SELECT * FROM withdrawal_requests WHERE id = ? AND user_id = ? FOR UPDATE');
+        $requestStmt->execute([$requestId, $userId]);
+        $request = $requestStmt->fetch();
+        if (!$request || !hash_equals((string) $request['authorization_token_hash'], hash('sha256', $authorizationToken))) {
+            throw new RuntimeException('Authorization QR code could not be verified.');
+        }
+        if ($request['authorization_token_used_at'] !== null) {
+            throw new RuntimeException('This authorization QR code has already been used.');
+        }
+        if ($request['status'] !== 'pending' || $request['pin_verified_at'] === null
+            || strtotime($request['expires_at']) <= time()) {
+            throw new RuntimeException('This authorization request has expired or is not ready.');
+        }
+        if (!in_array($request['payout_method'], ['ewallet', 'bank_transfer'], true)) {
+            throw new RuntimeException('This payout method does not require separate authorization.');
+        }
+
+        $authorizeStmt = $pdo->prepare(
+            "UPDATE withdrawal_requests
+                SET status = 'authorized', authorized_at = CURRENT_TIMESTAMP,
+                    authorization_token_used_at = CURRENT_TIMESTAMP
+              WHERE id = ? AND status = 'pending' AND authorization_token_used_at IS NULL
+                AND pin_verified_at IS NOT NULL AND expires_at > CURRENT_TIMESTAMP"
+        );
+        $authorizeStmt->execute([$requestId]);
+        if ($authorizeStmt->rowCount() !== 1) {
+            throw new RuntimeException('This withdrawal request has expired. Please start again.');
+        }
+        $request['status'] = 'authorized';
+        $request['authorized_at'] = date('Y-m-d H:i:s');
+        $request['authorization_token_used_at'] = $request['authorized_at'];
+        $pdo->commit();
+        return $request;
+    } catch (Throwable $ex) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $ex;
+    }
+}
+
+function consumeWithdrawalAuthorizationTokenById(int $requestId, string $authorizationToken): array
+{
+    $stmt = db()->prepare(
+        'SELECT user_id FROM withdrawal_requests
+          WHERE id = ? AND authorization_token_hash = ?'
+    );
+    $stmt->execute([$requestId, hash('sha256', $authorizationToken)]);
+    $userId = $stmt->fetchColumn();
+    if ($userId === false) {
+        throw new RuntimeException('Authorization QR code could not be verified.');
+    }
+    return consumeWithdrawalAuthorizationToken((int) $userId, $requestId, $authorizationToken);
+}
+
+function completeAuthorizedWithdrawalRequest(int $userId, int $requestId, string $token): array
+{
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $walletStmt = $pdo->prepare('SELECT * FROM wallets WHERE user_id = ? FOR UPDATE');
+        $walletStmt->execute([$userId]);
+        $wallet = $walletStmt->fetch();
+        if (!$wallet) {
+            throw new RuntimeException('User has no wallet.');
+        }
+
+        $requestStmt = $pdo->prepare('SELECT * FROM withdrawal_requests WHERE id = ? AND user_id = ? FOR UPDATE');
+        $requestStmt->execute([$requestId, $userId]);
+        $request = $requestStmt->fetch();
+        if (!$request || !hash_equals((string) $request['token_hash'], hash('sha256', $token))) {
+            throw new RuntimeException('Withdrawal request could not be verified.');
+        }
+        if ($request['status'] !== 'authorized' || $request['authorization_token_used_at'] === null
+            || strtotime($request['expires_at']) <= time()) {
+            throw new RuntimeException('This authorized payout is no longer available.');
+        }
+        if (!in_array($request['payout_method'], ['ewallet', 'bank_transfer'], true)) {
+            throw new RuntimeException('This payout method is not eligible for simulated authorization.');
+        }
+
+        $methodLabel = $request['payout_method'] === 'ewallet' ? 'E-Wallet' : 'Bank Transfer';
+        $description = $methodLabel . ' Withdrawal';
+        $receipt = json_encode([
+            'type' => 'withdrawal',
+            'amount' => (int) $request['points_amount'],
+            'payout_method' => $request['payout_method'],
+            'provider' => $request['provider'],
+            'account_holder' => $request['account_holder'],
+            'account_last4' => $request['account_last4'],
+            'fee' => (string) $request['fee'],
+            'net_amount' => (string) $request['net_amount'],
+            'description' => 'Simulated ' . $description,
+            'timestamp' => date('Y-m-d H:i:s'),
+        ], JSON_THROW_ON_ERROR);
+
+        $transactionStmt = $pdo->prepare(
+            "INSERT INTO transactions
+                (wallet_id, type, amount, source_description, status, reference_id, balance_after, receipt_data)
+             VALUES (?, 'withdrawal', ?, ?, 'completed', ?, ?, ?)"
+        );
+        $transactionStmt->execute([
+            $wallet['id'],
+            $request['points_amount'],
+            $description,
+            $request['reference_id'],
+            $wallet['balance'],
+            $receipt,
+        ]);
+        $transactionId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare('UPDATE wallets SET lifetime_redeemed = lifetime_redeemed + ? WHERE id = ?')
+            ->execute([$request['points_amount'], $wallet['id']]);
+
+        $completeStmt = $pdo->prepare(
+            "UPDATE withdrawal_requests
+                SET status = 'completed', points_reserved = 0, transaction_id = ?,
+                    completed_at = CURRENT_TIMESTAMP
+              WHERE id = ? AND status = 'authorized'
+                AND authorization_token_used_at IS NOT NULL
+                AND expires_at > CURRENT_TIMESTAMP"
+        );
+        $completeStmt->execute([$transactionId, $requestId]);
+        if ($completeStmt->rowCount() !== 1) {
+            throw new RuntimeException('This payout expired before it could be completed.');
+        }
+
+        $pdo->commit();
+        return [
+            'id' => $transactionId,
+            'reference_id' => $request['reference_id'],
+            'amount' => (int) $request['points_amount'],
+            'balance_after' => (int) $wallet['balance'],
+            'payout_method' => $request['payout_method'],
+            'provider' => $request['provider'],
+        ];
+    } catch (Throwable $ex) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $ex;
+    }
+}
+
+function cancelWithdrawalRequest(int $userId, int $requestId, string $token): void
+{
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $walletStmt = $pdo->prepare('SELECT id FROM wallets WHERE user_id = ? FOR UPDATE');
+        $walletStmt->execute([$userId]);
+        $wallet = $walletStmt->fetch();
+        if (!$wallet) {
+            throw new RuntimeException('User has no wallet.');
+        }
+
+        $requestStmt = $pdo->prepare('SELECT * FROM withdrawal_requests WHERE id = ? AND user_id = ? FOR UPDATE');
+        $requestStmt->execute([$requestId, $userId]);
+        $request = $requestStmt->fetch();
+        if (!$request || !hash_equals((string) $request['token_hash'], hash('sha256', $token))) {
+            throw new RuntimeException('Withdrawal request could not be verified.');
+        }
+        if (!in_array($request['status'], ['pending', 'authorized'], true)) {
+            throw new RuntimeException('This withdrawal request can no longer be changed.');
+        }
+
+        $reserved = (int) $request['points_reserved'];
+        $update = $pdo->prepare(
+            "UPDATE withdrawal_requests
+                SET status = 'cancelled', points_reserved = 0, cancelled_at = CURRENT_TIMESTAMP
+              WHERE id = ? AND status IN ('pending', 'authorized')"
+        );
+        $update->execute([$requestId]);
+        if ($update->rowCount() === 1 && $reserved > 0) {
+            $pdo->prepare('UPDATE wallets SET balance = balance + ? WHERE id = ?')
+                ->execute([$reserved, $wallet['id']]);
+            $pdo->prepare('UPDATE users SET points_balance = points_balance + ? WHERE id = ?')
+                ->execute([$reserved, $userId]);
+        }
+
+        $pdo->commit();
+    } catch (Throwable $ex) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $ex;
+    }
+}
+
+/**
+ * Complete a simulated voucher payout and create its EcoWallet ledger receipt.
+ */
+function completeVoucherWithdrawalRequest(int $userId, int $requestId, string $token): array
+{
+    $pdo = db();
+    $pdo->beginTransaction();
+    try {
+        $walletStmt = $pdo->prepare('SELECT * FROM wallets WHERE user_id = ? FOR UPDATE');
+        $walletStmt->execute([$userId]);
+        $wallet = $walletStmt->fetch();
+        if (!$wallet) {
+            throw new RuntimeException('User has no wallet.');
+        }
+
+        $requestStmt = $pdo->prepare('SELECT * FROM withdrawal_requests WHERE id = ? AND user_id = ? FOR UPDATE');
+        $requestStmt->execute([$requestId, $userId]);
+        $request = $requestStmt->fetch();
+        if (!$request || !hash_equals((string) $request['token_hash'], hash('sha256', $token))) {
+            throw new RuntimeException('Withdrawal request could not be verified.');
+        }
+        if ($request['payout_method'] !== 'voucher' || $request['status'] !== 'pending'
+            || strtotime($request['expires_at']) <= time()) {
+            throw new RuntimeException('This voucher request is no longer available. Please start again.');
+        }
+
+        $receipt = json_encode([
+            'type' => 'withdrawal',
+            'amount' => (int) $request['points_amount'],
+            'payout_method' => 'voucher',
+            'provider' => $request['provider'],
+            'voucher_code' => $request['voucher_code'],
+            'fee' => (string) $request['fee'],
+            'net_amount' => (string) $request['net_amount'],
+            'description' => 'Simulated Gift Card / Voucher Withdrawal',
+            'timestamp' => date('Y-m-d H:i:s'),
+        ], JSON_THROW_ON_ERROR);
+        $description = 'Gift Card / Voucher Withdrawal';
+        $txnStmt = $pdo->prepare(
+            "INSERT INTO transactions
+                (wallet_id, type, amount, source_description, status, reference_id, balance_after, receipt_data)
+             VALUES (?, 'withdrawal', ?, ?, 'completed', ?, ?, ?)"
+        );
+        $txnStmt->execute([
+            $wallet['id'],
+            $request['points_amount'],
+            $description,
+            $request['reference_id'],
+            $wallet['balance'],
+            $receipt,
+        ]);
+        $transactionId = (int) $pdo->lastInsertId();
+
+        $pdo->prepare('UPDATE wallets SET lifetime_redeemed = lifetime_redeemed + ? WHERE id = ?')
+            ->execute([$request['points_amount'], $wallet['id']]);
+        $completeStmt = $pdo->prepare(
+            "UPDATE withdrawal_requests
+                SET status = 'completed', points_reserved = 0, transaction_id = ?,
+                    completed_at = CURRENT_TIMESTAMP
+              WHERE id = ? AND status = 'pending' AND expires_at > CURRENT_TIMESTAMP"
+        );
+        $completeStmt->execute([$transactionId, $requestId]);
+        if ($completeStmt->rowCount() !== 1) {
+            throw new RuntimeException('This voucher request has expired. Please start again.');
+        }
+
+        $pdo->commit();
+        return [
+            'id' => $transactionId,
+            'reference_id' => $request['reference_id'],
+            'amount' => (int) $request['points_amount'],
+            'balance_after' => (int) $wallet['balance'],
+            'voucher_code' => (string) $request['voucher_code'],
+            'net_amount' => (string) $request['net_amount'],
+        ];
+    } catch (Throwable $ex) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $ex;
+    }
 }
 
 function logWithdrawalAudit(int $userId, string $action, ?int $amount = null, ?string $method = null, ?int $transactionId = null, array $details = []): void
@@ -1039,6 +1812,7 @@ function createWithdrawal(int $userId, int $points, string $payoutMethod, string
         if (!$wallet) {
             throw new RuntimeException('User has no wallet.');
         }
+        assertWalletWithdrawalCooldownExpired($wallet);
         if ($points < WALLET_MIN_WITHDRAWAL) {
             throw new RuntimeException('Minimum withdrawal is ' . num(WALLET_MIN_WITHDRAWAL) . ' points.');
         }
@@ -1119,72 +1893,42 @@ function createWithdrawal(int $userId, int $points, string $payoutMethod, string
  */
 function createRedemptionTransaction(int $userId, int $points, string $rewardTitle): array
 {
-    $pdo = db();
-    $wallet = getUserWallet($userId);
+    if ($points <= 0) {
+        throw new InvalidArgumentException('Redemption points must be positive.');
+    }
+    return adjustPoints(
+        $userId,
+        -$points,
+        'redemption',
+        $rewardTitle,
+        ['reward' => $rewardTitle],
+        'redeemed'
+    );
+}
 
-    if (!$wallet) {
-        throw new RuntimeException('User has no wallet.');
+function walletTransactionLabel(string $type): string
+{
+    return match ($type) {
+        'deposit' => 'Deposit',
+        'withdrawal' => 'Withdrawal',
+        'redemption' => 'Redemption',
+        'adjustment' => 'Adjustment',
+        default => 'Transaction',
+    };
+}
+
+function walletTransactionBalanceChange(array $transaction): int
+{
+    $type = (string) ($transaction['type'] ?? '');
+    if ($type === 'adjustment') {
+        $receipt = json_decode($transaction['receipt_data'] ?? '{}', true);
+        if (is_array($receipt) && isset($receipt['balance_change']) && is_numeric($receipt['balance_change'])) {
+            return (int) $receipt['balance_change'];
+        }
     }
 
-    if ($wallet['balance'] < $points) {
-        throw new RuntimeException('Insufficient balance.');
-    }
-
-    $pdo->beginTransaction();
-    try {
-        $newBalance = $wallet['balance'] - $points;
-        $newRedeemed = $wallet['lifetime_redeemed'] + $points;
-
-        $stmt = $pdo->prepare(
-            'UPDATE wallets
-             SET balance = ?, lifetime_redeemed = ?
-             WHERE id = ?'
-        );
-        $stmt->execute([$newBalance, $newRedeemed, $wallet['id']]);
-        
-        // Also deduct from rewards points balance to keep them synchronized
-        $pdo->prepare('UPDATE users SET points_balance = points_balance - ? WHERE id = ?')
-            ->execute([$points, $userId]);
-
-        $refId = 'RED-' . strtoupper(bin2hex(random_bytes(6)));
-        $txnStmt = $pdo->prepare(
-            'INSERT INTO transactions (wallet_id, type, amount, source_description, status, reference_id, balance_after, receipt_data)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-        );
-
-        $receipt = json_encode([
-            'type' => 'redemption',
-            'amount' => $points,
-            'reward' => $rewardTitle,
-            'timestamp' => date('Y-m-d H:i:s')
-        ]);
-
-        $txnStmt->execute([
-            $wallet['id'],
-            'redemption',
-            $points,
-            $rewardTitle,
-            'completed',
-            $refId,
-            $newBalance,
-            $receipt
-        ]);
-
-        $txnId = (int) $pdo->lastInsertId();
-        $pdo->commit();
-
-        return [
-            'id' => $txnId,
-            'reference_id' => $refId,
-            'type' => 'redemption',
-            'amount' => $points,
-            'status' => 'completed',
-            'balance_after' => $newBalance
-        ];
-    } catch (Throwable $ex) {
-        $pdo->rollBack();
-        throw $ex;
-    }
+    $amount = (int) ($transaction['amount'] ?? 0);
+    return $type === 'deposit' ? $amount : -$amount;
 }
 
 /**
@@ -1237,8 +1981,10 @@ function generateReceipt(array $transaction, int $userId): string
     
     $html .= '<div style="border-top:1px solid #ddd; border-bottom:1px solid #ddd; padding:15px 0; margin:15px 0;">';
     $html .= '<div style="display:flex; justify-content:space-between; margin:8px 0;"><span>Account:</span><strong>' . e($user['name']) . '</strong></div>';
-    $html .= '<div style="display:flex; justify-content:space-between; margin:8px 0;"><span>Type:</span><strong>' . e(ucfirst($transaction['type'])) . '</strong></div>';
-    $html .= '<div style="display:flex; justify-content:space-between; margin:8px 0;"><span>Amount:</span><strong>' . num($transaction['amount']) . ' pts</strong></div>';
+    $balanceChange = walletTransactionBalanceChange($transaction);
+    $amountPrefix = $balanceChange >= 0 ? '+' : '−';
+    $html .= '<div style="display:flex; justify-content:space-between; margin:8px 0;"><span>Type:</span><strong>' . e(walletTransactionLabel((string) $transaction['type'])) . '</strong></div>';
+    $html .= '<div style="display:flex; justify-content:space-between; margin:8px 0;"><span>Amount:</span><strong>' . $amountPrefix . num(abs($balanceChange)) . ' pts</strong></div>';
     $html .= '<div style="display:flex; justify-content:space-between; margin:8px 0;"><span>Status:</span><span style="color:' . (strpos($transaction['status'], 'completed') !== false ? 'green' : 'orange') . '; font-weight:bold;">' . e(ucfirst($transaction['status'])) . '</span></div>';
     $html .= '<div style="display:flex; justify-content:space-between; margin:8px 0;"><span>Reference:</span><strong style="font-size:12px;">' . e($transaction['reference_id']) . '</strong></div>';
     $html .= '<div style="display:flex; justify-content:space-between; margin:8px 0;"><span>Balance After:</span><strong>' . num($transaction['balance_after']) . ' pts</strong></div>';
