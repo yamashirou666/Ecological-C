@@ -1,2 +1,8 @@
+logs/*.log
+*.sql
+!sql/schema.sql
+.env
+config/secrets.php
 node_modules/
+vendor/
 dist/
