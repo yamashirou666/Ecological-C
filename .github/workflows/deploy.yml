@@ -25,6 +25,40 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # config/config.php reads config/secrets.php when it exists.
+      # This builds that file from your GitHub secrets so the real
+      # database details never live in the repo.
+      - name: Generate config/secrets.php
+        env:
+          S_DB_HOST: ${{ secrets.DB_HOST }}
+          S_DB_NAME: ${{ secrets.DB_NAME }}
+          S_DB_USER: ${{ secrets.DB_USER }}
+          S_DB_PASS: ${{ secrets.DB_PASS }}
+          S_APP_KEY: ${{ secrets.ECOCYCLE_APP_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os
+
+          def q(value):
+              # Escape for a single-quoted PHP string
+              return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+          values = {
+              "db_host": os.environ["S_DB_HOST"],
+              "db_port": "3306",
+              "db_name": os.environ["S_DB_NAME"],
+              "db_user": os.environ["S_DB_USER"],
+              "db_pass": os.environ["S_DB_PASS"],
+              "app_key": os.environ.get("S_APP_KEY", ""),
+              "app_base_url": "https://ecologicalcycle.fwh.is",
+          }
+          lines = ["<?php", "return ["]
+          lines += [f"    {q(k)} => {q(v)}," for k, v in values.items()]
+          lines.append("];")
+          with open("config/secrets.php", "w") as f:
+              f.write("\n".join(lines) + "\n")
+          PY
+
       - name: Deploy to InfinityFree
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
@@ -55,11 +89,8 @@ jobs:
             **/*.md
             docs/**
             electron/**
+            sql/**
             **/*.png.bak
             dashboard_page.png
             .gitignore
             .ftp-deploy-sync-state.json
-            # Keep real DB passwords out of the repo, upload this file once
-            # by hand in the File Manager, then uncomment the next line so
-            # deploys never overwrite it:
-            # config/database.php
