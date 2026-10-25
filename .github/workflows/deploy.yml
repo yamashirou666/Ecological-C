@@ -1,20 +1,65 @@
 name: Deploy to InfinityFree
+
 on:
   push:
     branches: [main]
+  workflow_dispatch: # adds a "Run workflow" button in the Actions tab
+
+# Only let this workflow read the repo (least privilege)
+permissions:
+  contents: read
+
+# If you push twice quickly, cancel the older deploy instead of
+# running two FTP uploads at the same time
+concurrency:
+  group: deploy-infinityfree
+  cancel-in-progress: true
 
 jobs:
   deploy:
+    name: Upload via FTP
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # free FTP can hang; don't burn Actions minutes
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to InfinityFree
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
-          server-dir: htdocs/
+
+          # InfinityFree FTP does not support encryption on the free plan
+          protocol: ftp
+          port: 21
+
+          # Upload the repo root...
+          local-dir: ./
+          # ...into the folder your domain actually serves.
+          # (The plain "htdocs/" at the FTP root is NOT served.)
+          server-dir: ecologicalcycle.fwh.is/htdocs/
+
+          # Change to "info" or "verbose" if you need to debug
+          log-level: standard
+
+          # Setting exclude replaces the action's defaults,
+          # so the .git entries are repeated here on purpose.
           exclude: |
             **/.git*
             **/.git*/**
-            README.md
+            .github/**
+            **/node_modules/**
+            **/*.md
+            docs/**
+            electron/**
+            **/*.png.bak
+            dashboard_page.png
+            .gitignore
+            .ftp-deploy-sync-state.json
+            # Keep real DB passwords out of the repo, upload this file once
+            # by hand in the File Manager, then uncomment the next line so
+            # deploys never overwrite it:
+            # config/database.php
